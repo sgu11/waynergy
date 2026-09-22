@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Re-exec Waynergy after Hyprland's active monitor layout changes.
+set -uo pipefail
+
+socket="$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
+ctl="${XDG_BIN_HOME:-$HOME/.local/bin}/waynergy-ctl"
+settle_seconds="${WAYNERGY_DISPLAY_SETTLE_SEC:-1}"
+pending_pid=""
+
+if [[ ! "$settle_seconds" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+  printf 'WAYNERGY_DISPLAY_SETTLE_SEC must be a non-negative number\n' >&2
+  exit 64
+fi
+
+cleanup() {
+  if [[ -n "$pending_pid" ]] && kill -0 "$pending_pid" 2>/dev/null; then
+    kill "$pending_pid" 2>/dev/null || true
+    wait "$pending_pid" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+trap 'exit 0' INT TERM
+
+schedule_refresh() {
+  # Hyprland can emit several layout notifications while outputs settle. Keep
+  # moving one timer forward so Waynergy sees the final topology only once.
+  if [[ -n "$pending_pid" ]] && kill -0 "$pending_pid" 2>/dev/null; then
+    kill "$pending_pid" 2>/dev/null || true
+    wait "$pending_pid" 2>/dev/null || true
+  fi
+
+  (
+    sleep "$settle_seconds"
+    "$ctl" refresh-display
+  ) &
+  pending_pid=$!
+}
+
+[[ -x "$ctl" ]] || {
+  printf 'waynergy-ctl is not executable: %s\n' "$ctl" >&2
+  exit 1
+}
+[[ -S "$socket" ]] || {
+  printf 'Hyprland event socket is unavailable: %s\n' "$socket" >&2
+  exit 1
+}
+
+# Listen only to the v2 variants. Current Hyprland emits both legacy and v2
+# monitor events, so consuming both would schedule every refresh twice.
+while IFS= read -r event; do
+  case "$event" in
+    monitoraddedv2\>\>*|monitorremovedv2\>\>*) schedule_refresh ;;
+  esac
+done < <(socat -U - "UNIX-CONNECT:$socket")

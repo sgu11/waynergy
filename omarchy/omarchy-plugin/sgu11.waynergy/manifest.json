@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "sgu11.waynergy",
+  "name": "Waynergy",
+  "version": "1.0.0",
+  "author": "sgu11",
+  "license": "MIT",
+  "description": "Waynergy 연결 상태, 서비스, 자동 시작과 주요 설정을 관리합니다.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Waynergy.qml"
+  },
+  "barWidget": {
+    "displayName": "Waynergy",
+    "description": "Waynergy 연결 상태 확인과 서비스·자동 시작 제어",
+    "category": "Input",
+    "aliases": ["waynergy", "deskflow", "synergy", "kvm"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 10
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "새로고침 간격(초)",
+        "min": 3,
+        "max": 600,
+        "step": 1,
+        "defaultValue": 10
+      }
+    ]
+  }
+}

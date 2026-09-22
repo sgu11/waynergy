@@ -1,0 +1,16 @@
+[Unit]
+Description=Waynergy Deskflow/Synergy client
+Documentation=https://github.com/r-c-f/waynergy
+After=graphical-session.target
+PartOf=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/waynergy
+Restart=always
+RestartSec=3
+Environment=XDG_RUNTIME_DIR=%t
+
+[Install]
+WantedBy=graphical-session.target

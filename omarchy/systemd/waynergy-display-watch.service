@@ -1,0 +1,16 @@
+[Unit]
+Description=Refresh Waynergy after Hyprland monitor layout changes
+Documentation=https://github.com/r-c-f/waynergy
+After=graphical-session.target waynergy.service
+PartOf=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
+ConditionEnvironment=HYPRLAND_INSTANCE_SIGNATURE
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/waynergy-display-watch
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

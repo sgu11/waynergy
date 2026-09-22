@@ -1,0 +1,171 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sgu11 <21072846+sgu11@users.noreply.github.com>
+Date: Thu, 28 Aug 2026 14:40:00 +0900
+Subject: [PATCH] Align to protocol 1.8 (Deskflow/Synergy 1.8+) and handle new
+ messages
+
+- Bump USYNERGY_PROTOCOL_MINOR 6 -> 8 so the server creates a 1.8 proxy
+  instead of 1.6. This enables Synergy/Deskflow 1.8 features while
+  remaining compatible with 1.6 servers via negotiation.
+- Add "Deskflow" to the hello implementation list for future servers that
+  use the Deskflow name (8 bytes, keep Barrier/Synergy for backwards compat).
+- Handle DKDL (key down with language, v1.8) by stripping the trailing
+  language string and dispatching as a normal key event.
+- Handle DKRP with optional trailing language string.
+- Handle SECN/LSYN (secure input / language sync) and file-transfer
+  messages (DFTR/DDRG) as benign no-ops instead of "Unknown packet".
+- Handle EICV/EUNK explicitly so incompatible/unknown-client errors are
+  surfaced correctly instead of being treated as generic unknown packets.
+---
+ include/uSynergy.h |  4 ++--
+ src/uSynergy.c     | 95 +++++++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 96 insertions(+), 3 deletions(-)
+
+diff --git a/include/uSynergy.h b/include/uSynergy.h
+index 2a52a24..8a1b2c3 100644
+--- a/include/uSynergy.h
++++ b/include/uSynergy.h
+@@ -100,8 +100,8 @@ enum uSynergyClipboardFormat
+ /**
+ @brief Constants and limits
+ **/
+-#define				USYNERGY_PROTOCOL_MAJOR			1				/* Major protocol version */
+-#define				USYNERGY_PROTOCOL_MINOR			6				/* Minor protocol version */
++#define				USYNERGY_PROTOCOL_MAJOR			1				/* Major protocol version */
++#define				USYNERGY_PROTOCOL_MINOR			8				/* Minor protocol version */
+ 
+ #define				USYNERGY_IDLE_TIMEOUT			10000			/* Timeout in milliseconds before reconnecting */
+ 
+diff --git a/src/uSynergy.c b/src/uSynergy.c
+index 0bec8d5..9a3b2e1 100644
+--- a/src/uSynergy.c
++++ b/src/uSynergy.c
+@@ -297,6 +297,7 @@ void uSynergySendClipboard(uSynergyContext *context, int id, uint32_t len, const
+  **/
+ static char *sImplementations[] = {
+ 	"Barrier",
++	"Deskflow",
+ 	"Synergy",
+ 	NULL
+ };
+@@ -508,14 +509,35 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
+ 	else if (!strcmp(pkt_id, "DKRP"))
+ 	{
+ 		// Key repeat
+-		//		kMsgDKeyRepeat		= "DKRP%2i%2i%2i%2i"
++		//		kMsgDKeyRepeat		= "DKRP%2i%2i%2i%2i"      (1.1+)
++		//		kMsgDKeyRepeatLang	= "DKRP%2i%2i%2i%2i%s"   (1.8+, with language)
+ 		//		kMsgDKeyRepeat1_0	= "DKRP%2i%2i%2i"
+ 		uint16_t id, mod, count, key;
+ 		if (!(sspNetU16(msg, &id) &&
+ 		      sspNetU16(msg, &mod) &&
+ 		      sspNetU16(msg, &count) &&
+ 		      sspNetU16(msg, &key))) {
+ 			PARSE_ERROR();
+ 		}
++		// Optional trailing language string in 1.8+
++		if (msg->pos < msg->len) {
++			uint32_t lang_len;
++			size_t saved = msg->pos;
++			if (sspNetU32(msg, &lang_len) && msg->pos + lang_len <= msg->len) {
++				if (!sspSeek(msg, lang_len)) {
++					PARSE_ERROR();
++				}
++			} else {
++				msg->pos = saved;
++			}
++		}
+ 		logDbgSyn("DKRP: id %" PRIu16 ", mod %" PRIx16 ", count %" PRIu16 ", key %" PRIu16, id, mod, count, key);
+ 		sSendKeyboardCallback(context, context->m_useRawKeyCodes ? key : id, id, mod, true, true);
+ 	}
+ 	else if (!strcmp(pkt_id, "DKUP"))
+ 	{
+ 		// Key up
+ 		//		kMsgDKeyUp			= "DKUP%2i%2i%2i"
+ 		//		kMsgDKeyUp1_0		= "DKUP%2i%2i"
+ 		uint16_t id, mod, key;
+ 		if (!(sspNetU16(msg, &id) && sspNetU16(msg, &mod) && sspNetU16(msg, &key))) {
+ 			PARSE_ERROR();
+ 		}
+ 		logDbgSyn("DKUP: id %" PRIu16 ", mod %" PRIx16 ", key %" PRIu16, id, mod, key);
+ 		sSendKeyboardCallback(context, context->m_useRawKeyCodes ? key : id, id, mod, false, false);
+ 	}
++	else if (!strcmp(pkt_id, "DKDL"))
++	{
++		// Key down with language (v1.8+)
++		//   kMsgDKeyDownLang = "DKDL%2i%2i%2i%s"  (id, mod, key, lang)
++		uint16_t id, mod, key;
++		uint32_t lang_len;
++		if (!(sspNetU16(msg, &id) && sspNetU16(msg, &mod) && sspNetU16(msg, &key) && sspNetU32(msg, &lang_len))) {
++			PARSE_ERROR();
++		}
++		if (!sspSeek(msg, lang_len)) {
++			PARSE_ERROR();
++		}
++		logDbgSyn("DKDL: id %" PRIu16 ", mod %" PRIx16 ", key %" PRIu16 " lang_len %" PRIu32, id, mod, key, lang_len);
++		sSendKeyboardCallback(context, context->m_useRawKeyCodes ? key : id, id, mod, true, false);
++	}
++	else if (!strcmp(pkt_id, "SECN") || !strcmp(pkt_id, "LSYN"))
++	{
++		// Secure input notification / Language synchronisation (v1.7+)
++		//   kMsgDSecureInputNotification = "SECN%s"
++		//   kMsgDLanguageSynchronisation = "LSYN%s"
++		uint32_t slen;
++		if (!sspNetU32(msg, &slen)) {
++			PARSE_ERROR();
++		}
++		if (!sspSeek(msg, slen)) {
++			PARSE_ERROR();
++		}
++		logDbg("Ignoring %s (len %" PRIu32 ")", pkt_id, slen);
++	}
+ 	else if (!strcmp(pkt_id, "DGBT"))
+ 	{
+ 		// Joystick buttons
+@@ -674,6 +696,35 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
+ 			context->m_clipInStream[id] = false;
+ 		}
+ 	}
++	else if (!strcmp(pkt_id, "DFTR") || !strcmp(pkt_id, "DDRG"))
++	{
++		// File transfer / drag info (v1.5+): "DFTR%1i%s" / "DDRG%2i%s"
++		// Not supported by waynergy; consume the payload so the stream
++		// stays in sync and ignore.
++		// Try to read as string first; if that fails try mark+string form.
++		uint32_t slen;
++		size_t saved = msg->pos;
++		if (sspNetU32(msg, &slen) && msg->pos + slen <= msg->len) {
++			if (!sspSeek(msg, slen)) {
++				PARSE_ERROR();
++			}
++		} else {
++			msg->pos = saved;
++			uint8_t mark;
++			if (!sspUChar(msg, &mark) || !sspNetU32(msg, &slen) || !sspSeek(msg, slen)) {
++				PARSE_ERROR();
++			}
++		}
++		logDbg("Ignoring file-transfer %s", pkt_id);
++	}
+ 	else if (!strcmp(pkt_id, "CBYE")) {
+ 		logInfo("Server disconnected");
+ 		sSetDisconnected(context, USYNERGY_ERROR_NONE);
+ 		return;
+ 	}
++	else if (!strcmp(pkt_id, "EICV")) {
++		uint16_t major, minor;
++		if (!(sspNetU16(msg, &major) && sspNetU16(msg, &minor))) {
++			PARSE_ERROR();
++		}
++		logErr("Incompatible protocol version %u.%u", (unsigned)major, (unsigned)minor);
++		sSetDisconnected(context, USYNERGY_ERROR_EBAD);
++		return;
++	}
++	else if (!strcmp(pkt_id, "EUNK")) {
++		logErr("Unknown client name (server has no such screen)");
++		sSetDisconnected(context, USYNERGY_ERROR_EBAD);
++		return;
++	}
+ 	else if (!strcmp(pkt_id, "EBAD")) {
+ 		logErr("Protocol error");
+ 		sSetDisconnected(context, USYNERGY_ERROR_EBAD);

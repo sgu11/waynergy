@@ -4,6 +4,18 @@ An implementation of a synergy client for wayland compositors. Based on the
 upstream uSynergy library (heavily modified for more protocol support and
 a bit of paranoia).
 
+## This fork
+
+This fork adds Deskflow/Synergy protocol 1.8 support, defers clipboard grabs
+until a valid screen-enter sequence, filters optional wheel encoder bounce,
+and fixes screensaver command child waiting. It includes upstream changes
+through `ad49be7`.
+
+For Omarchy/Hyprland installation, panel controls, monitor refresh, and optional
+server lock synchronization, see [the Omarchy integration](omarchy/README.md).
+Package recipes and regression checks are in `omarchy/packaging/waynergy-custom/`.
+See [publication notes](omarchy/docs/publication.md) for source provenance.
+
 ## Getting started
 
 ### Prerequisites
@@ -334,6 +346,27 @@ accumulated rather than sent directly; to correct for this the discrete
 parameter is now a multiple of `120` rather than `1`. For sway or wayfire
 users on Linux this is automatically detected and worked around; otherwise,
 the `wlr/wheel_mult` configuration option may be used. 
+
+#### Wheel direction reversals (encoder bounce)
+
+Some mice bounce their wheel encoder, emitting a single notch in the opposite
+direction in the middle of a scroll burst. This happens on the server, before
+the event reaches the network, so it cannot be fixed on the client -- but it
+can be filtered: the spurious reversal follows the preceding notch far sooner
+than a human can actually reverse direction.
+
+Setting `mouse/wheel_debounce_ms` to a non-zero value drops a wheel notch whose
+direction is opposite to the last notch that was actually emitted, if it
+arrives within that many milliseconds. The horizontal and vertical axes are
+tracked independently, and a dropped notch does not update the stored
+direction, so a run of them cannot walk the filter forward. The default of `0`
+disables the filter entirely.
+
+Pick the threshold from the two intervals it has to separate: measure how
+quickly the spurious reversal follows its predecessor, and how quickly you
+deliberately reverse the wheel. A value comfortably between the two -- `25` is
+a reasonable starting point -- filters the bounce without swallowing real
+direction changes. Run with debug logging to see which notches are dropped.
 
 ## Acknowledgements
 I would like to thank

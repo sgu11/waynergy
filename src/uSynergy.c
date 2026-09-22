@@ -296,6 +296,7 @@ barrier compatibility
 **/
 static char *sImplementations[] = {
 	"Barrier",
+	"Deskflow",
 	"Synergy",
 	NULL
 };
@@ -407,6 +408,20 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 		}
 		context->m_isCaptured = true;
 
+		/* announce any clipboard grab that was deferred for lack of a
+		 * sequence number */
+		for (int id = 0; id < 2; ++id) {
+			if (context->m_clipGrabPending[id]) {
+				context->m_clipGrabPending[id] = false;
+				if (!(sAddString(context, "CCLP") &&
+				      sAddUInt8(context, id) &&
+				      sAddUInt32(context, context->m_sequenceNumber))) {
+					PARSE_ERROR();
+				}
+				sSendReply(context);
+			}
+		}
+
 		// Call callback
 		if (context->m_screenActiveCallback != 0L)
 			context->m_screenActiveCallback(context->m_cookie, true);
@@ -508,7 +523,8 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 	else if (!strcmp(pkt_id, "DKRP"))
 	{
 		// Key repeat
-		//		kMsgDKeyRepeat		= "DKRP%2i%2i%2i%2i"
+		//		kMsgDKeyRepeat		= "DKRP%2i%2i%2i%2i"      (1.1+)
+		//		kMsgDKeyRepeatLang	= "DKRP%2i%2i%2i%2i%s"   (1.8+, with language)
 		//		kMsgDKeyRepeat1_0	= "DKRP%2i%2i%2i"
 		uint16_t id, mod, count, key;
 		if (!(sspNetU16(msg, &id) &&
@@ -517,8 +533,49 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 		      sspNetU16(msg, &key))) {
 			PARSE_ERROR();
 		}
+		// Optional trailing language string in 1.8+
+		if (msg->pos < msg->len) {
+			uint32_t lang_len;
+			size_t saved = msg->pos;
+			if (sspNetU32(msg, &lang_len) && msg->pos + lang_len <= msg->len) {
+				if (!sspSeek(msg, lang_len)) {
+					PARSE_ERROR();
+				}
+			} else {
+				msg->pos = saved;
+			}
+		}
 		logDbgSyn("DKRP: id %" PRIu16 ", mod %" PRIx16 ", count %" PRIu16 ", key %" PRIu16, id, mod, count, key);
 		sSendKeyboardCallback(context, context->m_useRawKeyCodes ? key : id, id, mod, true, true);
+	}
+	else if (!strcmp(pkt_id, "DKDL"))
+	{
+		// Key down with language (v1.8+)
+		//   kMsgDKeyDownLang = "DKDL%2i%2i%2i%s"  (id, mod, key, lang)
+		uint16_t id, mod, key;
+		uint32_t lang_len;
+		if (!(sspNetU16(msg, &id) && sspNetU16(msg, &mod) && sspNetU16(msg, &key) && sspNetU32(msg, &lang_len))) {
+			PARSE_ERROR();
+		}
+		if (!sspSeek(msg, lang_len)) {
+			PARSE_ERROR();
+		}
+		logDbgSyn("DKDL: id %" PRIu16 ", mod %" PRIx16 ", key %" PRIu16 " lang_len %" PRIu32, id, mod, key, lang_len);
+		sSendKeyboardCallback(context, context->m_useRawKeyCodes ? key : id, id, mod, true, false);
+	}
+	else if (!strcmp(pkt_id, "SECN") || !strcmp(pkt_id, "LSYN"))
+	{
+		// Secure input notification / Language synchronisation (v1.7+)
+		//   kMsgDSecureInputNotification = "SECN%s"
+		//   kMsgDLanguageSynchronisation = "LSYN%s"
+		uint32_t slen;
+		if (!sspNetU32(msg, &slen)) {
+			PARSE_ERROR();
+		}
+		if (!sspSeek(msg, slen)) {
+			PARSE_ERROR();
+		}
+		logDbg("Ignoring %s (len %" PRIu32 ")", pkt_id, slen);
 	}
 	else if (!strcmp(pkt_id, "DKUP"))
 	{
@@ -671,9 +728,43 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 			context->m_clipInStream[id] = false;
 		}
 	}
+	else if (!strcmp(pkt_id, "DFTR") || !strcmp(pkt_id, "DDRG"))
+	{
+		// File transfer / drag info (v1.5+): "DFTR%1i%s" / "DDRG%2i%s"
+		// Not supported by waynergy; consume the payload so the stream
+		// stays in sync and ignore.
+		uint32_t slen;
+		size_t saved = msg->pos;
+		if (sspNetU32(msg, &slen) && msg->pos + slen <= msg->len) {
+			if (!sspSeek(msg, slen)) {
+				PARSE_ERROR();
+			}
+		} else {
+			msg->pos = saved;
+			uint8_t mark;
+			if (!sspUChar(msg, &mark) || !sspNetU32(msg, &slen) || !sspSeek(msg, slen)) {
+				PARSE_ERROR();
+			}
+		}
+		logDbg("Ignoring file-transfer %s", pkt_id);
+	}
 	else if (!strcmp(pkt_id, "CBYE")) {
 		logInfo("Server disconnected");
 		sSetDisconnected(context, USYNERGY_ERROR_NONE);
+		return;
+	}
+	else if (!strcmp(pkt_id, "EICV")) {
+		uint16_t major, minor;
+		if (!(sspNetU16(msg, &major) && sspNetU16(msg, &minor))) {
+			PARSE_ERROR();
+		}
+		logErr("Incompatible protocol version %u.%u", (unsigned)major, (unsigned)minor);
+		sSetDisconnected(context, USYNERGY_ERROR_EBAD);
+		return;
+	}
+	else if (!strcmp(pkt_id, "EUNK")) {
+		logErr("Unknown client name (server has no such screen)");
+		sSetDisconnected(context, USYNERGY_ERROR_EBAD);
 		return;
 	}
 	else if (!strcmp(pkt_id, "EBAD")) {
@@ -924,6 +1015,12 @@ void uSynergyUpdateClipBuf(uSynergyContext *context, enum uSynergyClipboardId id
 	buf = buf_add_int32(buf, USYNERGY_CLIPBOARD_FORMAT_TEXT); //type, text only for now
 	buf = buf_add_int32(buf, len); //length of actual data
 	memmove(buf, data, len);
+	/* Synergy 3 servers reply EBAD to a grab sent before the first screen
+	 * enter (sequence number still 0), so defer it until CINN arrives */
+	if (!context->m_sequenceNumber) {
+		context->m_clipGrabPending[id] = true;
+		return;
+	}
 	/* send CCLP  -- CCLP%1i%4i */
 	if (!(sAddString(context, "CCLP") &&
 	      sAddUInt8(context, id) &&

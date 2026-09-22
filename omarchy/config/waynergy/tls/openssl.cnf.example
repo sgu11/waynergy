@@ -1,0 +1,12 @@
+[req]
+distinguished_name = dn
+prompt = no
+x509_extensions = ext
+
+[dn]
+CN = __NAME__
+
+[ext]
+basicConstraints = CA:FALSE
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = clientAuth

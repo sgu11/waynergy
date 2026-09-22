@@ -287,7 +287,67 @@ void wlMouseButton(struct wlContext *ctx, int button, int state)
 	logDbg("Mouse button: %d (mapped to %d), state: %d", button, ctx->input.button_map[button], state);
 	ctx->input.mouse_button(&ctx->input, ctx->input.button_map[button], state);
 }
+/* Some mice bounce their wheel encoder, producing a notch in the opposite
+ * direction in the middle of a scroll burst. The reversal arrives far sooner
+ * than a human can reverse direction, so it can be filtered on timing alone.
+ * Returns true if this notch should be dropped; a dropped notch does not
+ * become the new reference, so a burst of them cannot walk the state forward. */
+static bool wheel_debounce(struct wlContext *ctx, int axis, int delta)
+{
+	int dir;
+	uint32_t now, elapsed;
+
+	if (!delta) {
+		return false;
+	}
+	dir = (delta > 0) - (delta < 0);
+	now = wlTS(ctx);
+	/* unsigned arithmetic, so this stays correct across wraparound */
+	elapsed = now - ctx->wheel_last_ts[axis];
+	if (ctx->wheel_last_dir[axis] && dir != ctx->wheel_last_dir[axis]) {
+		if (ctx->wheel_just_reversed[axis]) {
+			/* The notch we are reversing away from was itself a
+			 * reversal we let through -- possibly a bounce that
+			 * outran the window. This one is the user's scroll
+			 * coming back, so never eat it: doing so strands the
+			 * view where the bounce left it, which is worse than
+			 * the bounce. */
+			ctx->wheel_just_reversed[axis] = false;
+		} else if (elapsed < (uint32_t)ctx->wheel_debounce_ms) {
+			logDbg("Wheel debounce: dropping %s reversal (delta %d, %ums after last notch)",
+					axis ? "dy" : "dx", delta, (unsigned)elapsed);
+			return true;
+		} else {
+			/* A reversal just past the window is ambiguous -- it could
+			 * be a genuine direction change, or a bounce that barely
+			 * escaped. Only arm the return-protection when it arrived
+			 * close to the window (plausibly a late bounce); a large
+			 * gap is a fresh direction change and must not leak the
+			 * next fast reversal. */
+			if (elapsed < 2 * (uint32_t)ctx->wheel_debounce_ms)
+				ctx->wheel_just_reversed[axis] = true;
+		}
+	} else {
+		ctx->wheel_just_reversed[axis] = false;
+	}
+	ctx->wheel_last_dir[axis] = dir;
+	ctx->wheel_last_ts[axis] = now;
+	return false;
+}
+
 void wlMouseWheel(struct wlContext *ctx, signed short dx, signed short dy)
 {
+	logDbg("Mouse wheel: dx: %d, dy: %d", dx, dy);
+	if (ctx->wheel_debounce_ms > 0) {
+		if (wheel_debounce(ctx, 0, dx)) {
+			dx = 0;
+		}
+		if (wheel_debounce(ctx, 1, dy)) {
+			dy = 0;
+		}
+		if (!(dx || dy)) {
+			return;
+		}
+	}
 	ctx->input.mouse_wheel(&ctx->input, dx, dy);
 }

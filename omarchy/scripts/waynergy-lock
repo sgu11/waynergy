@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Lock through the Omarchy shell that owns the Wayland session lock.
+set -euo pipefail
+export PATH="/usr/share/omarchy/bin:$PATH"
+export OMARCHY_PATH="${OMARCHY_PATH:-/usr/share/omarchy}"
+reply=$(omarchy-shell lock lock)
+if [[ "$reply" != ok ]]; then
+  printf 'waynergy-lock: lock rejected: %s\n' "$reply" >&2
+  exit 1
+fi
+printf '%s\n' 'waynergy-lock: Omarchy lock requested'

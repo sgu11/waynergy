@@ -1,0 +1,2 @@
+# Preserve upstream's existing CRLF lines without treating CR as trailing space.
+src/uSynergy.c whitespace=cr-at-eol

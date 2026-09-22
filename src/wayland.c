@@ -513,6 +513,10 @@ bool wlSetup(struct wlContext *ctx, int width, int height, char *backend)
 
 	wl_log_set_handler_client(&wl_log_handler);
 	ctx->timeout = configTryLong("wayland/flush_timeout", 5000);
+	ctx->wheel_debounce_ms = configTryLong("mouse/wheel_debounce_ms", 0);
+	if (ctx->wheel_debounce_ms > 0) {
+		logInfo("Wheel debounce enabled: dropping direction reversals within %ldms", ctx->wheel_debounce_ms);
+	}
 
 	ctx->width = width;
 	ctx->height = height;

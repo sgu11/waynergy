@@ -1,0 +1,26 @@
+# Host-owned Waynergy runtime and trust material
+config/waynergy/config.ini
+config/waynergy/name
+config/waynergy/*.log
+config/waynergy/tls/cert
+.env
+.env.*
+!.env.example
+
+# Common local noise
+*.bak
+*.tmp
+
+# Local makepkg output for the optional patched package
+packaging/wheel-debounce/src/
+packaging/wheel-debounce/pkg/
+packaging/wheel-debounce/*.tar.gz
+packaging/wheel-debounce/*.pkg.tar.*
+packaging/waynergy-custom/src/
+packaging/waynergy-custom/pkg/
+packaging/waynergy-custom/*.tar.gz
+packaging/waynergy-custom/*.pkg.tar.*
+
+# Fork upstream checkout (nested git, host-specific)
+upstream/
+*.log

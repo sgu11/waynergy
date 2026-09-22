@@ -50,3 +50,7 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+# Local configuration and credentials are not public source.
+.env
+.env.*
+!.env.example

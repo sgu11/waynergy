@@ -1,0 +1,47 @@
+# Maintainer: sgu11 <21072846+sgu11@users.noreply.github.com>
+# Fork of r-c-f/waynergy with:
+#  - wheel debounce (optional bounce filter)
+#  - EBAD fix (defer CCLP until CINN) for Deskflow/Synergy 1.8
+#  - protocol 1.8 alignment (DKDL/SECN/LSYN/EICV/EUNK)
+# Includes upstream master ad49be7fe8f0347e790aef6c76858dc29ebed3d4
+# and the screensaver callback child-wait fix.
+
+pkgname=waynergy
+pkgver=0.0.17
+pkgrel=5
+pkgdesc="Synergy client for Wayland compositors (custom fork: EBAD fix + protocol 1.8 + wheel debounce)"
+arch=(x86_64)
+url="https://github.com/r-c-f/waynergy"
+license=('MIT')
+depends=('wayland' 'libxkbcommon' 'libretls')
+makedepends=(git meson ninja)
+optdepends=(
+  'wl-clipboard: Clipboard synchronization support'
+  'gnome-session: Idle inhibition for GNOME'
+)
+source=("$pkgname-$pkgver.tar.gz::https://github.com/r-c-f/waynergy/archive/refs/tags/v${pkgver}.tar.gz"
+        "custom-fork.patch"
+        "screensaver-child-wait.patch")
+sha256sums=('b8b2d12588cabfe161ce21a5cd898f06bdfd55c0106ecd4a26c8628aafeff990'
+            '4df4fbd271fc3ed6c2426f3bb62ea57762f08c4dcaec453fcfa0dee8e917873a'
+            '2ed053a42eccb5b06a7b8880e1dd25d8ab5e3225090edea8e0b4c991c98c4ed0')
+
+prepare() {
+  cd "$srcdir/${pkgname}-${pkgver}"
+  git init -q
+  git apply "$srcdir/custom-fork.patch"
+  git apply "$srcdir/screensaver-child-wait.patch"
+  rm -rf .git
+}
+
+build() {
+  cd "$srcdir/${pkgname}-${pkgver}"
+  arch-meson build
+  ninja -C build
+}
+
+package() {
+  cd "$srcdir/${pkgname}-${pkgver}/build"
+  DESTDIR="$pkgdir" ninja install
+  install -Dm644 ../LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

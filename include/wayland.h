@@ -123,6 +123,13 @@ struct wlContext {
 	int height;
 	time_t epoch;
 	long timeout;
+	/* wheel debounce: drop a wheel notch that reverses the previous one
+	 * within this many milliseconds. 0 (the default) disables it. */
+	long wheel_debounce_ms;
+	/* per-axis debounce state: [0] is horizontal, [1] is vertical */
+	int wheel_last_dir[2];
+	uint32_t wheel_last_ts[2];
+	bool wheel_just_reversed[2];
 	//callbacks
 	void (*on_output_update)(struct wlContext *ctx);
 };

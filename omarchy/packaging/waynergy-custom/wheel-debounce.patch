@@ -1,0 +1,166 @@
+From ce397c082fa1cd96d5107342865d26705ef21de9 Mon Sep 17 00:00:00 2001
+From: sgu11 <21072846+sgu11@users.noreply.github.com>
+Date: Wed, 26 Aug 2026 13:26:07 +0900
+Subject: [PATCH] Add optional wheel debounce to filter encoder bounce
+
+Some mice bounce their wheel encoder, emitting a single notch in the
+opposite direction in the middle of a scroll burst. The reversal happens
+on the server side, before the event ever reaches the protocol, so the
+client only sees a legitimate-looking notch -- but it arrives far sooner
+after its predecessor than a human can reverse direction, which makes it
+filterable on timing alone.
+
+Add mouse/wheel_debounce_ms: when non-zero, a notch whose direction is
+opposite to the last emitted notch and which arrives within that window
+is dropped. The two axes are tracked independently, and a dropped notch
+does not update the stored direction, so a run of reversals cannot walk
+the filter forward.
+
+This lives in wlMouseWheel() rather than in a backend, since the bounce
+is in the input stream and affects wlr, kde and uinput alike. The
+default of 0 leaves the existing code path untouched.
+
+Also log incoming wheel deltas at debug level, matching wlMouseButton().
+---
+ README.md                     | 21 ++++++++++++++++++
+ doc/config-example/config.ini |  5 +++++
+ include/wayland.h             |  6 ++++++
+ src/wayland.c                 |  4 ++++
+ src/wl_input.c                | 40 +++++++++++++++++++++++++++++++++++
+ 5 files changed, 76 insertions(+)
+
+diff --git a/README.md b/README.md
+index 3a23134..2422739 100644
+--- a/README.md
++++ b/README.md
+@@ -335,6 +335,27 @@ parameter is now a multiple of `120` rather than `1`. For sway or wayfire
+ users on Linux this is automatically detected and worked around; otherwise,
+ the `wlr/wheel_mult` configuration option may be used. 
+ 
++#### Wheel direction reversals (encoder bounce)
++
++Some mice bounce their wheel encoder, emitting a single notch in the opposite
++direction in the middle of a scroll burst. This happens on the server, before
++the event reaches the network, so it cannot be fixed on the client -- but it
++can be filtered: the spurious reversal follows the preceding notch far sooner
++than a human can actually reverse direction.
++
++Setting `mouse/wheel_debounce_ms` to a non-zero value drops a wheel notch whose
++direction is opposite to the last notch that was actually emitted, if it
++arrives within that many milliseconds. The horizontal and vertical axes are
++tracked independently, and a dropped notch does not update the stored
++direction, so a run of them cannot walk the filter forward. The default of `0`
++disables the filter entirely.
++
++Pick the threshold from the two intervals it has to separate: measure how
++quickly the spurious reversal follows its predecessor, and how quickly you
++deliberately reverse the wheel. A value comfortably between the two -- `25` is
++a reasonable starting point -- filters the bounce without swallowing real
++direction changes. Run with debug logging to see which notches are dropped.
++
+ ## Acknowledgements
+ I would like to thank
+ * [uSynergy](https://github.com/symless/synergy-micro-client) for the protocol library
+diff --git a/doc/config-example/config.ini b/doc/config-example/config.ini
+index b59032d..1dfeef4 100644
+--- a/doc/config-example/config.ini
++++ b/doc/config-example/config.ini
+@@ -26,6 +26,11 @@ level = 3
+ mode = a
+ path = /tmp/waynergy.log
+ 
++[mouse]
++# Drop a wheel notch that reverses the previous one within this many ms,
++# to work around wheel encoder bounce. 0 (the default) disables it.
++#wheel_debounce_ms = 25
++
+ [wayland]
+ # Timeout for display flushes (in ms), negative to block indefinitely
+ #flush_timeout = 5000
+diff --git a/include/wayland.h b/include/wayland.h
+index 2e47d2f..374f254 100644
+--- a/include/wayland.h
++++ b/include/wayland.h
+@@ -123,6 +123,12 @@ struct wlContext {
+ 	int height;
+ 	time_t epoch;
+ 	long timeout;
++	/* wheel debounce: drop a wheel notch that reverses the previous one
++	 * within this many milliseconds. 0 (the default) disables it. */
++	long wheel_debounce_ms;
++	/* per-axis debounce state: [0] is horizontal, [1] is vertical */
++	int wheel_last_dir[2];
++	uint32_t wheel_last_ts[2];
+ 	//callbacks
+ 	void (*on_output_update)(struct wlContext *ctx);
+ };
+diff --git a/src/wayland.c b/src/wayland.c
+index 7d91bcd..52f23ae 100644
+--- a/src/wayland.c
++++ b/src/wayland.c
+@@ -513,6 +513,10 @@ bool wlSetup(struct wlContext *ctx, int width, int height, char *backend)
+ 
+ 	wl_log_set_handler_client(&wl_log_handler);
+ 	ctx->timeout = configTryLong("wayland/flush_timeout", 5000);
++	ctx->wheel_debounce_ms = configTryLong("mouse/wheel_debounce_ms", 0);
++	if (ctx->wheel_debounce_ms > 0) {
++		logInfo("Wheel debounce enabled: dropping direction reversals within %ldms", ctx->wheel_debounce_ms);
++	}
+ 
+ 	ctx->width = width;
+ 	ctx->height = height;
+diff --git a/src/wl_input.c b/src/wl_input.c
+index 8a245a6..ddd0f9a 100644
+--- a/src/wl_input.c
++++ b/src/wl_input.c
+@@ -287,7 +287,47 @@ void wlMouseButton(struct wlContext *ctx, int button, int state)
+ 	logDbg("Mouse button: %d (mapped to %d), state: %d", button, ctx->input.button_map[button], state);
+ 	ctx->input.mouse_button(&ctx->input, ctx->input.button_map[button], state);
+ }
++/* Some mice bounce their wheel encoder, producing a notch in the opposite
++ * direction in the middle of a scroll burst. The reversal arrives far sooner
++ * than a human can reverse direction, so it can be filtered on timing alone.
++ * Returns true if this notch should be dropped; a dropped notch does not
++ * become the new reference, so a burst of them cannot walk the state forward. */
++static bool wheel_debounce(struct wlContext *ctx, int axis, int delta)
++{
++	int dir;
++	uint32_t now, elapsed;
++
++	if (!delta) {
++		return false;
++	}
++	dir = (delta > 0) - (delta < 0);
++	now = wlTS(ctx);
++	/* unsigned arithmetic, so this stays correct across wraparound */
++	elapsed = now - ctx->wheel_last_ts[axis];
++	if (ctx->wheel_last_dir[axis] && dir != ctx->wheel_last_dir[axis] &&
++			elapsed < (uint32_t)ctx->wheel_debounce_ms) {
++		logDbg("Wheel debounce: dropping %s reversal (delta %d, %ums after last notch)",
++				axis ? "dy" : "dx", delta, (unsigned)elapsed);
++		return true;
++	}
++	ctx->wheel_last_dir[axis] = dir;
++	ctx->wheel_last_ts[axis] = now;
++	return false;
++}
++
+ void wlMouseWheel(struct wlContext *ctx, signed short dx, signed short dy)
+ {
++	logDbg("Mouse wheel: dx: %d, dy: %d", dx, dy);
++	if (ctx->wheel_debounce_ms > 0) {
++		if (wheel_debounce(ctx, 0, dx)) {
++			dx = 0;
++		}
++		if (wheel_debounce(ctx, 1, dy)) {
++			dy = 0;
++		}
++		if (!(dx || dy)) {
++			return;
++		}
++	}
+ 	ctx->input.mouse_wheel(&ctx->input, dx, dy);
+ }
+-- 
+2.55.0
+
