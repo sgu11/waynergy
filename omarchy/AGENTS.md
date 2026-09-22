@@ -18,3 +18,8 @@ These source tests do not replace native lock acceptance after deployment.
 Upstream `src/uSynergy.c` retains mixed CRLF/LF lines. Preserve them when
 importing source; use the public fork's `whitespace=cr-at-eol` attribute or
 `git -c core.whitespace=cr-at-eol diff --check` to check that source correctly.
+
+For public snapshots, compare the public Git index against every tracked
+integration path, not only files on disk. Upstream's `*.d` ignore rule hides
+`config.ini.d`; the public root must explicitly allow the `lock-sync.ini`
+template so the optional installer remains complete.

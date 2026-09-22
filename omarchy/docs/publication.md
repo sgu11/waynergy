@@ -33,6 +33,11 @@ paths, credentials, and runtime data. Generic examples and public upstream
 credits can remain. Push only the reviewed public branch, without private
 branches or tags, and confirm its HEAD matches GitHub.
 
+Compare every tracked integration path with the public Git index after import.
+Upstream ignores `*.d` directories, so explicitly allow
+`omarchy/config/waynergy/config.ini.d/lock-sync.ini` in the public root ignore
+rules. A file present on disk can otherwise be absent from the published tree.
+
 ## Verification
 
 Build with `makepkg --force` in `omarchy/packaging/waynergy-custom`. Then run

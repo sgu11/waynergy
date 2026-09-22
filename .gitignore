@@ -54,3 +54,8 @@ dkms.conf
 .env
 .env.*
 !.env.example
+
+# Upstream's *.d rule also matches this tracked configuration directory.
+!omarchy/config/waynergy/config.ini.d/
+omarchy/config/waynergy/config.ini.d/*
+!omarchy/config/waynergy/config.ini.d/lock-sync.ini
