@@ -333,6 +333,13 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 		if (!(sspNetU16(msg, &server_major) && sspNetU16(msg, &server_minor))) {
 			PARSE_ERROR();
 		}
+		/* Older wire formats are not implemented by the packet parsers. */
+		if (server_major != USYNERGY_PROTOCOL_MAJOR || server_minor < 6) {
+			logErr("Unsupported server protocol %u.%u (requires 1.6 or newer 1.x)",
+					(unsigned)server_major, (unsigned)server_minor);
+			sSetDisconnected(context, USYNERGY_ERROR_EBAD);
+			return;
+		}
 		/* Never advertise a minor version newer than the server supports. */
 		context->m_protocolMinor = USYNERGY_PROTOCOL_MINOR;
 		if (server_major == USYNERGY_PROTOCOL_MAJOR && server_minor < context->m_protocolMinor)

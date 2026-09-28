@@ -137,7 +137,8 @@ See the [package notes](../packaging/waynergy-custom/README.md) for the update
 procedure and verification commands.
 
 The integrated client negotiates the lower of its supported minor version and
-the server's minor version, so a 1.6 server receives a 1.6 hello. It reports
+the server's minor version, so a 1.6 server receives a 1.6 hello. Versions below
+1.6 and other major versions are rejected before completing the handshake. It reports
 secure-input applications and server keyboard layouts in the log. Removing
 the first Wayland output preserves the rest of the list; nonpositive geometry
 updates leave the last valid screen size and input-backend geometry intact.

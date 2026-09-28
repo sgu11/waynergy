@@ -7,7 +7,8 @@ a bit of paranoia).
 ## This fork
 
 This fork supports Deskflow/Synergy protocol 1.8 and negotiates down for older
-servers. It defers clipboard grabs until a valid screen-enter sequence,
+servers down to 1.6; older versions and other major versions are rejected
+before completing the handshake. It defers clipboard grabs until a valid screen-enter sequence,
 filters optional wheel encoder bounce, waits for screensaver command children,
 and preserves valid screen geometry during monitor changes. It includes
 upstream changes through `ad49be7`.
