@@ -13,6 +13,10 @@ for spec in 'cleanup:cleanup' 'sig_handle:sig-handle' 'sigWaitSIGCHLD:sig-wait';
 done
 sed -n '/^static void syn_screensaver_cb(/,/^}/p' "$SRC/src/main.c" > "$WORK/screensaver.inc"
 test -s "$WORK/screensaver.inc"
+sed -n '/^void wlOutputRemove(/,/^}/p' "$SRC/src/wayland.c" > "$WORK/output-remove.inc"
+sed -n '/^void wl_output_update_cb(/,/^}/p' "$SRC/src/main.c" > "$WORK/output-update.inc"
+test -s "$WORK/output-remove.inc"
+test -s "$WORK/output-update.inc"
 mkdir "$WORK/config"
 printf '[screensaver]\nstart=true\nstop=true\n' > "$WORK/config/config.ini"
 cc -D_GNU_SOURCE -DUSYNERGY_LITTLE_ENDIAN -g -O2 \
