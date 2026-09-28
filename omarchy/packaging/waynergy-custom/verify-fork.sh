@@ -2,7 +2,7 @@
 # Run after makepkg: use the actual prepared sources and generated headers.
 set -euo pipefail
 HERE="$(cd -- "$(dirname -- "$0")" && pwd)"
-SRC="$(realpath "${1:-$HERE/src/waynergy-0.0.17}")"
+SRC="$(realpath "${1:-$HERE/src/waynergy}")"
 WORK="$(mktemp -d -t waynergy-fork-check.XXXXXX)"
 # Leave these disposable test artifacts to OS-managed temporary cleanup.
 for spec in 'cleanup:cleanup' 'sig_handle:sig-handle' 'sigWaitSIGCHLD:sig-wait'; do

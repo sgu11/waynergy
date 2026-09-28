@@ -12,10 +12,6 @@ config/waynergy/tls/cert
 *.tmp
 
 # Local makepkg output for the optional patched package
-packaging/wheel-debounce/src/
-packaging/wheel-debounce/pkg/
-packaging/wheel-debounce/*.tar.gz
-packaging/wheel-debounce/*.pkg.tar.*
 packaging/waynergy-custom/src/
 packaging/waynergy-custom/pkg/
 packaging/waynergy-custom/*.tar.gz
