@@ -19,7 +19,8 @@ makepkg --cleanbuild --force
 ```
 
 `makepkg` verifies the archive checksum, compiles the client, runs `check()`,
-and creates the package. `check()` runs both verification helpers against the
+and creates the package. The verification scripts and C fixtures are included
+in `source` with checksums, so `makepkg --source` produces a self-contained recipe. `check()` runs both verification helpers against the
 actual prepared source. To repeat only those checks:
 
 ```sh
@@ -52,3 +53,13 @@ Do not point the recipe at a moving branch or add behavior patches alongside it.
 
 The former release-archive patches and wheel-only package are available in Git
 history before this migration.
+
+For the real client handshake check, run from the repository root in an active
+Wayland session with Python 3 available:
+
+```sh
+python3 test/protocol-handshake.py build/waynergy
+```
+
+This starts isolated clients against loopback servers, checks protocol 1.6–1.8
+negotiation and rejection of unsupported versions, and sends no input or lock events.

@@ -13,9 +13,14 @@ optdepends=(
   'wl-clipboard: Clipboard synchronization support'
   'gnome-session: Idle inhibition for GNOME'
 )
-_commit=9173684a689211f88dc5da8396773507f33ccb9c
-source=("$pkgname-$_commit.tar.gz::$url/archive/$_commit.tar.gz")
-sha256sums=('7e3e6d8c50b734c76ad4b23357e910e207c8f5e85005bd9a878971da7ea95ebb')
+_commit=1c6ae9443fc2e774616f381770236fc9be7cc589
+source=("$pkgname-$_commit.tar.gz::$url/archive/$_commit.tar.gz"
+        "verify-fork.sh" "verify-fork.c" "verify-debounce.sh" "verify-debounce.c")
+sha256sums=('b1432d9635d6f28640ef5a4d5455dfa6d92ace9d6af5f03e7bdcd4e30e1b5f30'
+            'd2e2b6c4ccb183916db0d068fb6029bb605ba20330db99f08c3124473a45afce'
+            'e41ebdc0ec6cc99477f240188b88e4245dfb8e7b72460dc4354c0e9091434108'
+            '1b062e605db07dc8ac76869d1b6351e5b3a218489a89b1f00e027103f4d44049'
+            'bf9d28fae2f730545a7c0d91491e5e2a97d3b0171755d0725b43601d944cd137')
 
 prepare() {
   # Stable path for the build and verification helpers across source updates.
@@ -30,8 +35,8 @@ build() {
 }
 
 check() {
-  bash "$startdir/verify-fork.sh" "$srcdir/$pkgname"
-  bash "$startdir/verify-debounce.sh" "$srcdir/$pkgname"
+  bash "$srcdir/verify-fork.sh" "$srcdir/$pkgname"
+  bash "$srcdir/verify-debounce.sh" "$srcdir/$pkgname"
 }
 
 package() {

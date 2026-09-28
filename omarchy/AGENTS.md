@@ -23,3 +23,10 @@ For public snapshots, compare the public Git index against every tracked
 integration path, not only files on disk. Upstream's `*.d` ignore rule hides
 `config.ini.d`; the public root must explicitly allow the `lock-sync.ini`
 template so the optional installer remains complete.
+
+# Source package verification
+
+List every check() script and C fixture in PKGBUILD source with checksums,
+and run the extracted helpers from srcdir. Verify makepkg --source by unpacking
+the resulting archive into a fresh directory and building there; a repository
+checkout can hide missing source-package inputs.
