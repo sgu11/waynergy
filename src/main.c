@@ -121,6 +121,13 @@ void wl_output_update_cb(struct wlContext *context)
 	}
 	width = r - l;
 	height = t - b;
+	if (width <= 0 || height <= 0) {
+		/* Transient state while the compositor reconfigures outputs -- a
+		 * monitor sleeping, being unplugged, or switching input. Reporting it
+		 * would push a 0x0 screen to the server and to our input backend. */
+		logWarn("Ignoring degenerate geometry update: %dx%d", width, height);
+		return;
+	}
 	logInfo("Geometry updated: %dx%d", width, height);
 	uSynergyUpdateRes(&synContext, width, height);
 	wlResUpdate(&wlContext, width, height);

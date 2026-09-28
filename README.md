@@ -6,10 +6,16 @@ a bit of paranoia).
 
 ## This fork
 
-This fork adds Deskflow/Synergy protocol 1.8 support, defers clipboard grabs
-until a valid screen-enter sequence, filters optional wheel encoder bounce,
-and fixes screensaver command child waiting. It includes upstream changes
-through `ad49be7`.
+This fork supports Deskflow/Synergy protocol 1.8 and negotiates down for older
+servers down to 1.6; older versions and other major versions are rejected
+before completing the handshake. It defers clipboard grabs until a valid screen-enter sequence,
+filters optional wheel encoder bounce, waits for screensaver command children,
+and preserves valid screen geometry during monitor changes. It includes
+upstream changes through `ad49be7`.
+
+[sgu11/waynergy](https://github.com/sgu11/waynergy) is the source of truth for
+both the client and Omarchy integration. The package builds a pinned commit
+archive from this repository; behavior changes belong in the root source.
 
 For Omarchy/Hyprland installation, panel controls, monitor refresh, and optional
 server lock synchronization, see [the Omarchy integration](omarchy/README.md).

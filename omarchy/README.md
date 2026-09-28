@@ -19,9 +19,7 @@ Run this document's commands from that `omarchy/` directory. See
 | `scripts/waynergy-ctl` | `~/.local/bin/waynergy-ctl` | Reports live connection state and safely controls service/autostart |
 | `scripts/waynergy-display-watch` | `~/.local/bin/waynergy-display-watch` | Debounces Hyprland monitor add/remove events |
 | `omarchy-plugin/sgu11.waynergy/` | `~/.config/omarchy/plugins/sgu11.waynergy/` | Omarchy connection-status and control panel |
-| `packaging/waynergy-custom/` | local fork build (upstream updates + EBAD fix + protocol 1.8 + wheel debounce + callback fix) | Preferred: builds `0.0.17-5` instead of AUR |
-| `packaging/wheel-debounce/` | legacy patched build | Kept for reference; superseded by `waynergy-custom` |
-| `upstream/` | optional, ignored source checkout of `r-c-f/waynergy` | Branch `custom/fork` (upstream `ad49be7` + local patches); not needed to build |
+| `packaging/waynergy-custom/` | pinned GitHub source build | Preferred: builds `0.0.17-6` instead of AUR |
 | `scripts/install.sh` | run from this repository | Installs the captured configuration safely |
 | `scripts/doctor.sh` | run from this repository | Read-only installation and runtime checks |
 
@@ -32,7 +30,7 @@ the working systemd unit because Waynergy already reconnects by itself.
 ## Quick start
 
 `wl-clipboard` enables clipboard synchronization. The installer now builds
-Waynergy from the local fork (`packaging/waynergy-custom`, `0.0.17-5`) which
+Waynergy from a pinned `sgu11/waynergy` commit (`packaging/waynergy-custom`, `0.0.17-6`) which
 contains the Deskflow/Synergy 1.8 EBAD fix and Barrier protocol support, instead
 of the unpatched AUR package:
 
@@ -64,7 +62,7 @@ the filter — just set the threshold:
 
 `--wheel-debounce` uses the verified 100 ms threshold. Use
 `--wheel-debounce-ms MS` only after measuring receiving-side reversal
-intervals. The old `packaging/wheel-debounce` directory is kept for reference.
+intervals. All wheel-debounce code lives in the root source tree.
 
 The generated wlr configuration defaults to `wheel_mult=3`. The Omarchy panel
 offers `×1`, `×2`, and `×3`; selecting a value updates only that setting,
@@ -72,7 +70,7 @@ keeps a timestamped configuration backup, and briefly restarts Waynergy.
 
 The panel also has a wheel-debounce switch. It is guarded by a binary
 capability check (looks for the debounce log marker), so the stock AUR binary
-leaves it unavailable; the custom fork (`0.0.17-5`) enables it and uses the
+leaves it unavailable; the custom fork (`0.0.17-6`) enables it and uses the
 last configured threshold or 100 ms when none is set.
 
 The display watcher listens to Hyprland's v2 monitor add/remove events. It
@@ -123,18 +121,23 @@ installation and approve the printed SHA-256 fingerprint on the server:
 
 ## Current source baseline
 
-Updated on 2026-09-22 to upstream `master` at `ad49be7`:
+Updated on 2026-09-28. The public fork includes upstream `master` through
+`ad49be7`, plus the integrated protocol negotiation and display fixes:
 
-- `waynergy 0.0.17-5` (upstream updates + EBAD fix + protocol 1.8 + wheel debounce + screensaver callback fix)
+- `waynergy 0.0.17-6` (existing fork fixes + protocol negotiation + display geometry protection)
 - `wl-clipboard` for clipboard synchronization
 - Wayland `wlr` input backend
 - Deskflow 1.26.0.418 (legacy `Synergy` protocol, also supports `Barrier`) / Synergy 1.8 over port `24800`
 - user service tied to `graphical-session.target`
 - Omarchy shell panel polling service, autostart, and live TCP connection state
 
-The custom fork enables protocol 1.8 (`Barrier`/`Deskflow`/`Synergy` hello) and
-defers `CCLP` until `CINN`. Wheel debounce remains disabled (`0`) by default;
-the package release is `0.0.17-5`. The binary reports `0.0.17`, optionally with
+The custom fork accepts `Barrier`/`Deskflow`/`Synergy` hello messages, negotiates
+up to protocol 1.8, and defers `CCLP` until `CINN`. It preserves the remaining
+output list when the first monitor disappears and ignores nonpositive screen
+sizes, keeping the last valid geometry. The display watcher remains available
+for rebuilding compositor state after monitor changes.
+Wheel debounce remains disabled (`0`) by default;
+the package release is `0.0.17-6`. The binary reports `0.0.17`, optionally with
 a Git-derived version suffix when built inside a checkout. The legacy AUR
 build was `0.0.17-1.2`.
 

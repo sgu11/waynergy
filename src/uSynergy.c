@@ -137,6 +137,7 @@ static void sSetDisconnected(uSynergyContext *context, enum uSynergyError err)
 	context->m_receiveOfs = 0;
 	context->m_replyCur			= context->m_replyBuffer + 4;
 	context->m_sequenceNumber	= 0;
+	context->m_protocolMinor = USYNERGY_PROTOCOL_MINOR;
 	context->m_lastError = err;
 }
 
@@ -332,7 +333,20 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 		if (!(sspNetU16(msg, &server_major) && sspNetU16(msg, &server_minor))) {
 			PARSE_ERROR();
 		}
-		logInfo("Server is %s %" PRIu16 ".%" PRIu16, imp, server_major, server_minor);
+		/* Older wire formats are not implemented by the packet parsers. */
+		if (server_major != USYNERGY_PROTOCOL_MAJOR || server_minor < 6) {
+			logErr("Unsupported server protocol %u.%u (requires 1.6 or newer 1.x)",
+					(unsigned)server_major, (unsigned)server_minor);
+			sSetDisconnected(context, USYNERGY_ERROR_EBAD);
+			return;
+		}
+		/* Never advertise a minor version newer than the server supports. */
+		context->m_protocolMinor = USYNERGY_PROTOCOL_MINOR;
+		if (server_major == USYNERGY_PROTOCOL_MAJOR && server_minor < context->m_protocolMinor)
+			context->m_protocolMinor = server_minor;
+		logInfo("Server is %s %" PRIu16 ".%" PRIu16 ", answering as %d.%" PRIu16,
+				imp, server_major, server_minor,
+				USYNERGY_PROTOCOL_MAJOR, context->m_protocolMinor);
 
 		// Initialize position in reply buffer -- discards leftovers from
 		// failed send attempts, ensures no protocol errors on initialization
@@ -340,7 +354,7 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 
 		if(!(sAddString(context, imp) &&
 		      sAddUInt16(context, USYNERGY_PROTOCOL_MAJOR) &&
-		      sAddUInt16(context, USYNERGY_PROTOCOL_MINOR) &&
+		      sAddUInt16(context, context->m_protocolMinor) &&
 		      sAddUInt32(context, (uint32_t)strlen(context->m_clientName)) &&
 		      sAddString(context, context->m_clientName))) {
 			REPLY_ERROR();
@@ -575,7 +589,12 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 		if (!sspSeek(msg, slen)) {
 			PARSE_ERROR();
 		}
-		logDbg("Ignoring %s (len %" PRIu32 ")", pkt_id, slen);
+		if (!strcmp(pkt_id, "SECN"))
+			logInfo("Application on the server is blocking the keyboard: %.*s",
+					(int)slen, (char *)msg->data + msg->pos - slen);
+		else
+			logInfo("Server keyboard layouts: %.*s",
+					(int)slen, (char *)msg->data + msg->pos - slen);
 	}
 	else if (!strcmp(pkt_id, "DKUP"))
 	{
@@ -1033,6 +1052,12 @@ void uSynergyUpdateClipBuf(uSynergyContext *context, enum uSynergyClipboardId id
 /* Update resolution */
 void uSynergyUpdateRes(uSynergyContext *context, int16_t width, int16_t height)
 {
+	/* Keep the last valid geometry while outputs disappear or reconfigure. */
+	if (width <= 0 || height <= 0) {
+		logWarn("Ignoring screen geometry %dx%d, keeping %" PRIu16 "x%" PRIu16,
+				width, height, context->m_clientWidth, context->m_clientHeight);
+		return;
+	}
 	context->m_clientWidth = width;
 	context->m_clientHeight = height;
 	if (context->m_connected) {

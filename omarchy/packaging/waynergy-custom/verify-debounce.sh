@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # wheel_debounce() 를 waynergy 소스에서 그대로 추출해 실측 데이터로 돌린다.
-# 재구현이 아니라 추출이므로, 여기서 통과하면 설치된 코드가 통과한 것이다.
+# 지정한 소스의 동작만 검증한다. 설치된 바이너리의 동작은 별도로 검증한다.
 #
 #   ./verify-debounce.sh [waynergy source path]
 # The default is the source tree produced by makepkg in this directory.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SRC="${1:-$HERE/src/waynergy-0.0.17}"
+SRC="${1:-$HERE/src/waynergy}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 

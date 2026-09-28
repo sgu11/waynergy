@@ -1,57 +1,65 @@
 # waynergy-custom
 
-Custom package `0.0.17-5`, based on r-c-f/waynergy `v0.0.17` plus upstream
-`master` through `ad49be7fe8f0347e790aef6c76858dc29ebed3d4` (2026-09-13), with:
+Package `0.0.17-6` builds the root C source from
+[sgu11/waynergy](https://github.com/sgu11/waynergy). `PKGBUILD` pins the full
+source commit and its archive SHA-256. No behavior patches or nested source
+checkout are required.
 
-- EBAD fix: defer CCLP clipboard grab until first CINN (fixes Deskflow/Synergy 1.8 EBAD loop)
-- Protocol 1.8: bump minor to 8, add Deskflow hello, handle DKDL/SECN/LSYN/DFTR/DDRG/EICV/EUNK
-- Wheel debounce: filter encoder bounce (from packaging/wheel-debounce)
-- Screensaver callbacks: wait for command children and report completion
+The pinned source includes protocol negotiation up to 1.8, deferred clipboard
+grabs, wheel debounce, screensaver child waiting, upstream timeout/PID/keymap
+fixes, and display geometry protection. The package metadata and verification
+helpers can advance independently of the source pin when the C source is unchanged.
 
-The four upstream commits since `v0.0.17` improve Wayland connection errors,
-avoid sending SIGTERM to the client's own process group during cleanup, avoid
-false timeouts on backward clock ticks, and correct Windows XKB keycodes
-(offset 8 and distinct F11/F12 codes).
+## Build and verify
 
-The tracked source recipe is the `v0.0.17` archive, `custom-fork.patch`, then
-`screensaver-child-wait.patch`. All three inputs have SHA-256 checksums in
-`PKGBUILD`; the combined patch includes the upstream changes and the first
-three fork features above. The screensaver patch remains separate.
-
-`../../upstream` is an optional, ignored development checkout, not a build
-dependency. The release archive and tracked patches fully reproduce the
-source tree without requiring a previous local checkout or its commit history.
-
-Build without installing, then check the prepared implementation:
+Install the dependencies listed in `PKGBUILD`, then run from this directory:
 
 ```sh
-cd packaging/waynergy-custom
-makepkg --force
-./verify-debounce.sh
+makepkg --cleanbuild --force
+```
+
+`makepkg` verifies the archive checksum, compiles the client, runs `check()`,
+and creates the package. The verification scripts and C fixtures are included
+in `source` with checksums, so `makepkg --source` produces a self-contained recipe. `check()` runs both verification helpers against the
+actual prepared source. To repeat only those checks:
+
+```sh
 bash ./verify-fork.sh
+bash ./verify-debounce.sh
 ```
 
-`verify-debounce.sh` checks the measured 100 ms threshold and return-protection
-regressions, returning nonzero on failures. `verify-fork.sh` exercises the
-prepared protocol source and extracted callback/cleanup functions: protocol
-1.8 hellos and key events, deferred clipboard grabs, CSEC on/off and reconnect,
-real command child reaping, clock rollback/wraparound, and positive-PID cleanup.
-It also runs upstream's OS and configuration tests with exit-status checks.
-The callback harness uses harmless commands and a simulated compositor; native
-lock acceptance still follows [lock-sync.md](../../docs/lock-sync.md).
+`src/waynergy` points to the unpacked pinned source. An explicit source directory
+can also be passed to either helper after its Meson build has generated headers.
 
-When updating this source checkout again, merge upstream before regenerating
-the combined patch from the release base. Run the following from the repository
-root. Exclude `src/main.c` because its callback change is applied by the separate
-screensaver patch:
+The checks cover protocol 1.6 fallback and the 1.8 cap after reconnect, three
+hello names, clipboard deferral, key events, secure-input/layout notifications,
+CSEC callbacks and real command-child reaping, timeout boundaries, positive-PID
+cleanup, display geometry and output removal, and wheel debounce regressions.
+They invoke the upstream OS/configuration tests directly to propagate failures.
+Native compositor lock and live Deskflow acceptance require a separate deployment
+check; see [lock-sync.md](../../docs/lock-sync.md).
+
+## Update the source
+
+1. Commit and push reviewed root source changes to GitHub.
+2. Set `_commit` in `PKGBUILD` to that full commit ID and increment `pkgrel`.
+3. Download its archive from `sgu11/waynergy` and update `sha256sums`.
+4. Run `makepkg --cleanbuild --force` and compare the prepared C source with the intended commit.
+5. Commit the recipe and documentation update after the source commit.
+
+Keep the source commit reachable when merging a PR. Use a merge commit, or
+update the pin and checksum to the resulting commit after a squash/rebase.
+Do not point the recipe at a moving branch or add behavior patches alongside it.
+
+The former release-archive patches and wheel-only package are available in Git
+history before this migration.
+
+For the real client handshake check, run from the repository root in an active
+Wayland session with Python 3 available:
 
 ```sh
-git -C upstream diff --src-prefix=a/ --dst-prefix=b/ v0.0.17 HEAD -- \
-  . ':(exclude)src/main.c' > packaging/waynergy-custom/custom-fork.patch
+python3 test/protocol-handshake.py build/waynergy
 ```
 
-Review the full delta, update the checksums and package release, and verify
-that the prepared package source matches the merged checkout.
-
-The separate `0001-ebad-fix.patch` / `0002-protocol-1.8.patch` are the logical splits
-of the original fork changes, kept for review. They are not applied separately.
+This starts isolated clients against loopback servers, checks protocol 1.6–1.8
+negotiation and rejection of unsupported versions, and sends no input or lock events.

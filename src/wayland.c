@@ -162,7 +162,10 @@ void wlOutputRemove(struct wlOutput **outputs, struct wlOutput *output)
 		}
 		prev->next = prev->next->next;
 	} else {
-		*outputs = NULL;
+		/* Removing the head must keep the rest of the list. Dropping it left
+		 * us with no outputs at all, so the screen geometry collapsed to 0x0
+		 * whenever the first monitor went away. */
+		*outputs = output->next;
 	}
 	free(output->name);
 	free(output->desc);

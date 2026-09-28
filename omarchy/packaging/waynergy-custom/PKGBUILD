@@ -1,17 +1,11 @@
 # Maintainer: sgu11 <21072846+sgu11@users.noreply.github.com>
-# Fork of r-c-f/waynergy with:
-#  - wheel debounce (optional bounce filter)
-#  - EBAD fix (defer CCLP until CINN) for Deskflow/Synergy 1.8
-#  - protocol 1.8 alignment (DKDL/SECN/LSYN/EICV/EUNK)
-# Includes upstream master ad49be7fe8f0347e790aef6c76858dc29ebed3d4
-# and the screensaver callback child-wait fix.
-
+# Build the public fork directly; all behavior changes live in its root source.
 pkgname=waynergy
 pkgver=0.0.17
-pkgrel=5
-pkgdesc="Synergy client for Wayland compositors (custom fork: EBAD fix + protocol 1.8 + wheel debounce)"
+pkgrel=6
+pkgdesc="Synergy client for Wayland compositors with Deskflow and Omarchy support"
 arch=(x86_64)
-url="https://github.com/r-c-f/waynergy"
+url="https://github.com/sgu11/waynergy"
 license=('MIT')
 depends=('wayland' 'libxkbcommon' 'libretls')
 makedepends=(git meson ninja)
@@ -19,29 +13,34 @@ optdepends=(
   'wl-clipboard: Clipboard synchronization support'
   'gnome-session: Idle inhibition for GNOME'
 )
-source=("$pkgname-$pkgver.tar.gz::https://github.com/r-c-f/waynergy/archive/refs/tags/v${pkgver}.tar.gz"
-        "custom-fork.patch"
-        "screensaver-child-wait.patch")
-sha256sums=('b8b2d12588cabfe161ce21a5cd898f06bdfd55c0106ecd4a26c8628aafeff990'
-            '4df4fbd271fc3ed6c2426f3bb62ea57762f08c4dcaec453fcfa0dee8e917873a'
-            '2ed053a42eccb5b06a7b8880e1dd25d8ab5e3225090edea8e0b4c991c98c4ed0')
+_commit=1c6ae9443fc2e774616f381770236fc9be7cc589
+source=("$pkgname-$_commit.tar.gz::$url/archive/$_commit.tar.gz"
+        "verify-fork.sh" "verify-fork.c" "verify-debounce.sh" "verify-debounce.c")
+sha256sums=('b1432d9635d6f28640ef5a4d5455dfa6d92ace9d6af5f03e7bdcd4e30e1b5f30'
+            'd2e2b6c4ccb183916db0d068fb6029bb605ba20330db99f08c3124473a45afce'
+            'e41ebdc0ec6cc99477f240188b88e4245dfb8e7b72460dc4354c0e9091434108'
+            '1b062e605db07dc8ac76869d1b6351e5b3a218489a89b1f00e027103f4d44049'
+            'bf9d28fae2f730545a7c0d91491e5e2a97d3b0171755d0725b43601d944cd137')
 
 prepare() {
-  cd "$srcdir/${pkgname}-${pkgver}"
-  git init -q
-  git apply "$srcdir/custom-fork.patch"
-  git apply "$srcdir/screensaver-child-wait.patch"
-  rm -rf .git
+  # Stable path for the build and verification helpers across source updates.
+  ln -sfn "$pkgname-$_commit" "$srcdir/$pkgname"
 }
 
 build() {
-  cd "$srcdir/${pkgname}-${pkgver}"
-  arch-meson build
-  ninja -C build
+  cd "$srcdir/$pkgname"
+  meson setup build --prefix=/usr --libdir=lib --sbindir=bin \
+    --buildtype=plain --wrap-mode=nodownload -Db_pie=true
+  meson compile -C build
+}
+
+check() {
+  bash "$srcdir/verify-fork.sh" "$srcdir/$pkgname"
+  bash "$srcdir/verify-debounce.sh" "$srcdir/$pkgname"
 }
 
 package() {
-  cd "$srcdir/${pkgname}-${pkgver}/build"
-  DESTDIR="$pkgdir" ninja install
-  install -Dm644 ../LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  cd "$srcdir/$pkgname"
+  DESTDIR="$pkgdir" meson install -C build --no-rebuild
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

@@ -352,6 +352,7 @@ typedef struct uSynergyContext
 	/* State data, used internall by client, initialized by uSynergyInit() */
 	enum uSynergyError 						m_lastError; /* last error code which may have triggered a lost connection */
 	const char* 						m_implementation; /*implementation of the protocol -- usually "Synergy" or "Barrier" */
+	uint16_t m_protocolMinor; /* negotiated minor version for this connection */
 	bool					m_connected;									/* Is our socket connected? */
 	bool					m_hasReceivedHello;								/* Have we received a 'Hello' from the server? */
 	bool 					m_infoCurrent; /* whether we've gotten an acknowledge from our information message */

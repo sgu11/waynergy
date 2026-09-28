@@ -7,8 +7,8 @@ Usage: ./scripts/install.sh --host HOST --name NAME [options]
 
 Options:
   --port PORT       Synergy/Deskflow port (default: 24800)
-  --packages        Install waynergy from local fork (packaging/waynergy-custom) and wl-clipboard
-  --aur             Install waynergy from AUR instead of local fork (legacy)
+  --packages        Build waynergy from the pinned GitHub source (packaging/waynergy-custom) and wl-clipboard
+  --aur             Install waynergy from AUR instead of the GitHub fork (legacy)
   --wheel-debounce  Build the patched package and use a 100 ms threshold (now part of custom fork)
   --wheel-debounce-ms MS
                     Build the patched package with a custom 1-1000 ms threshold
@@ -91,19 +91,10 @@ if $install_packages; then
       printf '%s\n' 'makepkg is required to build the custom waynergy package.' >&2
       exit 1
     }
-    # Prefer the unified custom fork (EBAD fix + protocol 1.8 + wheel debounce).
-    # The old wheel-debounce directory is kept for reference but is superseded.
-    if [[ -d "$repo_dir/packaging/waynergy-custom" ]]; then
-      (
-        cd "$repo_dir/packaging/waynergy-custom"
-        makepkg -si --needed
-      )
-    else
-      (
-        cd "$repo_dir/packaging/wheel-debounce"
-        makepkg -si --needed
-      )
-    fi
+    (
+      cd "$repo_dir/packaging/waynergy-custom"
+      makepkg -si --needed
+    )
   fi
 fi
 

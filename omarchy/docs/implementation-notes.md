@@ -93,7 +93,7 @@ installation cannot appear enabled while silently ignoring the setting. On a
 patched build, enabling preserves the configured threshold (or selects 100 ms
 if it was unset); disabling writes zero and both transitions restart Waynergy.
 
-## Custom fork (`packaging/waynergy-custom`, `upstream/custom/fork`)
+## Custom fork (`packaging/waynergy-custom`)
 
 The AUR `0.0.17-1` build (`USYNERGY_PROTOCOL_MINOR 6`, `src/uSynergy.c:297` hello
 `{"Barrier","Synergy"}`) negotiates down to `1.6` and sends a `CCLP` clipboard
@@ -114,9 +114,8 @@ Protocol alignment:
   (secure input / language sync), `DFTR`/`DDRG` (file transfer), plus explicit
   `EICV`/`EUNK`.
 
-Wheel debounce (from `packaging/wheel-debounce`) is also included: two patches
-filter a direction reversal inside a configured interval and protect the user's
-returning notch. Return-protection is armed only when the escaping reversal
+Wheel debounce in the root source filters a direction reversal inside a
+configured interval and protects the user's returning notch. Return-protection is armed only when the escaping reversal
 arrived close to the window (within 2x). Horizontal and vertical axes are
 independent and the default is zero.
 
@@ -128,20 +127,21 @@ remains the root fix.
 After `makepkg` has prepared the source, validate the extracted implementation:
 
 ```bash
-./packaging/waynergy-custom/verify-debounce.sh
-# or
-./packaging/wheel-debounce/verify-debounce.sh
+bash ./packaging/waynergy-custom/verify-debounce.sh
 ```
 
-The `0.0.17-5` recipe includes upstream `master` through
-`ad49be7fe8f0347e790aef6c76858dc29ebed3d4`, merged on 2026-09-22. It retains
-the `7f014df` / `v0.0.17` archive as the reproducible base and applies
-`packaging/waynergy-custom/custom-fork.patch` (upstream updates plus the fork
-changes), then `screensaver-child-wait.patch` (the CSEC callback fix from
-`0.0.17-4`). The source checkout in `upstream/` is optional and ignored;
-the tracked recipe contains everything needed to build. See the
-[package notes](../packaging/waynergy-custom/README.md) for reconstruction and
-patch generation. `packaging/wheel-debounce/` is kept for reference.
+The `0.0.17-6` recipe downloads a pinned, SHA-256-checked commit archive from
+`sgu11/waynergy`. Source changes live at the repository root. The earlier
+`0.0.17-5` release archive and generated patches are retained in Git history.
+See the [package notes](../packaging/waynergy-custom/README.md) for the update
+procedure and verification commands.
+
+The integrated client negotiates the lower of its supported minor version and
+the server's minor version, so a 1.6 server receives a 1.6 hello. Versions below
+1.6 and other major versions are rejected before completing the handshake. It reports
+secure-input applications and server keyboard layouts in the log. Removing
+the first Wayland output preserves the rest of the list; nonpositive geometry
+updates leave the last valid screen size and input-backend geometry intact.
 
 Upstream now guards clipboard monitor PIDs with `> 0` during cleanup, avoiding
 accidental process-group SIGTERM when a monitor was never started. Both network
