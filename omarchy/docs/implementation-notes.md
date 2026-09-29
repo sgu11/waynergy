@@ -151,7 +151,7 @@ separate F11/F12 keycodes, consistent with this repository's existing raw-keymap
 
 ## Runtime behavior observed
 
-On 2026-08-24 with the unpatched `0.0.17-1` build, the journal showed:
+With the unpatched `0.0.17-1` build, the journal showed:
 
 1. connection to the configured server on port 24800;
 2. identification of the server as Synergy 1.8;
@@ -171,7 +171,7 @@ sequence.
 
 ## Optional retry wrapper
 
-The live host contains this older helper:
+This optional helper waits for the server TCP port before starting Waynergy:
 
 ```bash
 #!/bin/bash
