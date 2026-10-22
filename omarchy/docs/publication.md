@@ -36,8 +36,10 @@ Push only the reviewed public branch, without private branches or tags, and
 confirm its HEAD matches GitHub. The previous private source history is not
 part of a contribution merely because its fixes are ported.
 
-Ensure `omarchy/config/waynergy/config.ini.d/lock-sync.ini` remains tracked.
-Upstream's `*.d` ignore pattern otherwise hides that configuration directory.
+Ensure these templates remain tracked under
+`omarchy/config/waynergy/config.ini.d/`: `lock-sync.ini`, `cursor-sync.ini`,
+`macos-function-keys.ini`, and `media-keys.ini`. Upstream's `*.d` ignore
+pattern otherwise hides that configuration directory.
 
 ## Verification
 

@@ -242,3 +242,77 @@ case mismatch. For later content-only changes, rescan with:
 ```bash
 omarchy-shell shell rescanPlugins
 ```
+
+## Deskflow volume and mute keys
+
+Install the three logical media-ID mappings on a Linux XKB/evdev client:
+
+```sh
+./scripts/install-media-keys.sh
+```
+
+The installer backs up an existing `media-keys.ini`, installs only that snippet,
+and restarts an active Waynergy service. Existing connection, TLS, raw-keymap,
+wheel and lock settings remain host-owned. No package rebuild is needed.
+
+Deskflow macOS `OSXScreen::onMediaKey` sends logical IDs `0xE0AD` (mute),
+`0xE0AE` (volume down), and `0xE0AF` (volume up) with raw button zero.
+A raw macOS scancode map alone cannot identify these events. Waynergy's
+`wlKey` checks `[id-keymap]` before `[raw-keymap]`; XKB codes 121, 122 and 123
+produce `XF86AudioMute`, `XF86AudioLowerVolume` and `XF86AudioRaiseVolume`
+respectively. These values already include the evdev-to-XKB offset of eight.
+Do not map raw button zero to a single media key or replace the ordinary map.
+
+Verify through the live Deskflow connection with input on the client: tap
+volume down, volume up, then mute twice. Compare `wpctl get-volume
+@DEFAULT_AUDIO_SINK@` after each tap; check held volume keys and release too.
+A config parse or synthetic protocol test alone does not prove physical
+keyboard capture. Keep the original volume/mute state after verification.
+
+To roll back, restore the backed-up snippet, or move the newly created snippet
+outside `config.ini.d` if `previously-absent` was recorded, then restart
+`waynergy.service`.
+
+Native acceptance: the user confirmed QMK Fn+, / Fn+. volume input and the
+requested media-key check worked after installing the snippet. The live client
+reconnected; the three installed XKB codes resolve to the expected symbols.
+This change was verified on the existing `0.0.17-4` package without upgrading it.
+
+## macOS F16-F20 and Print Screen
+
+Run `./scripts/install-macos-function-keys.sh` on a client whose existing raw
+map uses macOS Deskflow key buttons. This isolated snippet maps only F16-F20
+to XKB codes 194-198, preserving the existing F13/Print, F14/Scroll Lock and
+F15/Pause aliases. It does not translate F20 into F13. The installer backs up
+the existing snippet, Hyprland helper and input config, then restarts an active service.
+
+On the QMK keyboard, use F20 for the separate function key and retain Print
+Screen for screenshots. macOS exposes Print Screen through its F13 virtual
+keycode, Scroll Lock through F14, and Pause through F15. Ordinary Deskflow
+keyboard events cannot distinguish each pair. F14/F15 also overlap with macOS
+brightness shortcuts, so this profile deliberately leaves F13-F15 and the
+Mac's brightness preferences alone. It does not force remote key presses to
+execute locally; the existing server/compositor routing remains in charge.
+No firmware or server binary change is required by the client snippet.
+
+Acceptance: with the pointer on the client, use `xkbcli interactive-wayland`
+in a temporary window to observe F16-F20 down/up and distinguish them from
+Print. Check the Print screenshot selector separately and cancel it without
+saving. Symbol-table checks establish mapping identity, not physical capture.
+Roll back by restoring the previous snippet (or moving the new snippet out
+of `config.ini.d`) and restarting Waynergy.
+
+The XKB `inet(evdev)` defaults map F16-F18 to `XF86Launch7`-`XF86Launch9`
+and F20 to microphone mute. The installer therefore also installs a per-device
+Hyprland helper for `hl-virtual-keyboard-waynergy`, preserving global keyboard
+options and appending `fkeys:basic_13-24`. Only that virtual keyboard changes;
+physical keyboards and the raw F13-F15 aliases retain their previous behavior.
+It adds one `dofile` hook to the host-owned `hypr/input.lua`, reloads Hyprland,
+and verifies the virtual keyboard's effective options after reconnecting.
+If a slow host config times out the reload reply, the installer still requires
+an empty config-error list and exact applied device options before success.
+
+Rollback must also restore the backed-up `input.lua` and helper, or remove the
+added hook and move the helper aside if it did not previously exist, then reload
+Hyprland. The current compositor's keymap is the acceptance boundary: checking
+only numeric evdev codes misses the default media-key aliases.

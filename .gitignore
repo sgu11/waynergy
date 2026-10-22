@@ -59,3 +59,6 @@ dkms.conf
 !omarchy/config/waynergy/config.ini.d/
 omarchy/config/waynergy/config.ini.d/*
 !omarchy/config/waynergy/config.ini.d/lock-sync.ini
+!omarchy/config/waynergy/config.ini.d/cursor-sync.ini
+!omarchy/config/waynergy/config.ini.d/macos-function-keys.ini
+!omarchy/config/waynergy/config.ini.d/media-keys.ini

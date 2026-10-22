@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Change the cursor only in the Hyprland session inherited from Waynergy.
+set -euo pipefail
+plugin="$HOME/.local/lib/waynergy/waynergy-cursor-refresh.so"
+case "${1:-}" in
+  init)
+    plugin=$(readlink -f -- "$plugin")
+    plugins=$(hyprctl -j plugin list)
+    if ! grep -Eq '"name"[[:space:]]*:[[:space:]]*"waynergy-cursor-refresh"' <<< "$plugins"; then
+      reply=$(timeout 5s hyprctl plugin load "$plugin")
+      [[ "$reply" == ok ]] || { printf 'waynergy-cursor: plugin load failed: %s\n' "$reply" >&2; exit 1; }
+    fi
+    reply=$(hyprctl eval 'assert(hl.plugin and hl.plugin.waynergy and type(hl.plugin.waynergy.refresh_cursor) == "function", "Waynergy cursor callback missing")')
+    [[ "$reply" == ok ]] || exit 1
+    exit 0
+    ;;
+  hide) hidden=true ;;
+  show) hidden=false ;;
+  *) printf 'Usage: waynergy-cursor {hide|show|init}\n' >&2; exit 2 ;;
+esac
+# Restore any timeout left by the previous implementation, then only change
+# visibility. The native callback evaluates all cursor conditions immediately.
+code="if _waynergy_cursor_timeout ~= nil then
+  hl.config({cursor = {inactive_timeout = _waynergy_cursor_timeout}})
+  _waynergy_cursor_timeout = nil
+end
+hl.config({cursor = {invisible = $hidden}})
+if hl.plugin and hl.plugin.waynergy and hl.plugin.waynergy.refresh_cursor then
+  hl.plugin.waynergy.refresh_cursor()
+end"
+reply=$(hyprctl eval "$code")
+if [[ "$reply" != ok ]]; then
+  printf 'waynergy-cursor: compositor rejected change: %s\n' "$reply" >&2
+  exit 1
+fi
+state=$(hyprctl -j getoption cursor:invisible)
+if ! grep -Eq '"bool"[[:space:]]*:[[:space:]]*'"$hidden"'([[:space:],}])' <<< "$state"; then
+  printf 'waynergy-cursor: compositor did not apply hidden=%s\n' "$hidden" >&2
+  exit 1
+fi
+printf 'waynergy-cursor: hidden=%s\n' "$hidden"

@@ -134,10 +134,8 @@ info() {
   printf '"tls":"%s",' "$(json_str "$(conf tls.enable)")"
   printf '"tofu":"%s",' "$(json_str "$(conf tls.tofu)")"
   local pin
-  pin="$(find "$TLSDIR" -maxdepth 1 -type f \
-    ! -name openssl.cnf ! -name generate-client-cert.sh ! -name cert \
-    -print -quit 2>/dev/null)"
-  printf '"pinned":%s,' "$([ -n "$pin" ]; json_bool $?)"
+  pin="$TLSDIR/hash/$(conf host)"
+  printf '"pinned":%s,' "$([ -f "$pin" ]; json_bool $?)"
   printf '"logLevel":"%s"' "$(json_str "$level")"
   printf '}\n'
 }

@@ -104,6 +104,9 @@ clipboard grab before `CINN` (`seq=0`), followed by a ~10 s reconnect loop;
 the custom fork defers the grab until `CINN` and connects stably to
 Deskflow 1.26 / Synergy 1.8 with clipboard sync enabled.
 
+For Space that keeps repeating around input-language switches, see
+[native Fcitx Ctrl+Space setup and verification](docs/ime-shortcut.md).
+
 ## Security and host-owned state
 
 TLS is enabled with trust-on-first-use (TOFU). Review the server fingerprint on
@@ -155,3 +158,24 @@ troubleshooting notes.
 
 See [macOS server lock synchronization](docs/lock-sync.md) to lock this Omarchy
 client when the Mac server locks, using the existing Waynergy CSEC callback.
+
+## Optional Deskflow volume and mute mapping
+
+For a macOS Deskflow server, run `./scripts/install-media-keys.sh` to map
+volume up/down and mute by logical key ID while preserving the raw keyboard
+map. The installer backs up the snippet and briefly restarts an active client.
+See [media-key setup and verification](docs/implementation-notes.md#deskflow-volume-and-mute-keys).
+
+## Optional macOS function keys
+
+Run `./scripts/install-macos-function-keys.sh` to preserve F13-F15 aliases
+and forward F16-F20 unchanged. See [function-key setup](docs/implementation-notes.md#macos-f16-f20-and-print-screen).
+
+## Optional cursor synchronization
+
+Run `bash scripts/install-cursor-sync.sh` to hide the client cursor when the
+server pointer leaves this screen and show it when it returns. The systemd
+drop-in restores visibility on service start or stop. This also hides the
+cursor of a mouse connected directly to the client. The installer builds a
+version-checked Hyprland plugin to apply hiding and showing without the
+compositor's 500 ms timer. See [cursor synchronization](docs/cursor-sync.md).
