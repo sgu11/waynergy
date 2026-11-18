@@ -66,19 +66,22 @@ intervals. All wheel-debounce code lives in the root source tree.
 
 The generated wlr configuration defaults to `wheel_mult=3`. The Omarchy panel
 offers `×1`, `×2`, and `×3`; selecting a value updates only that setting,
-keeps a timestamped configuration backup, and briefly restarts Waynergy.
+keeps a unique timestamped backup, and briefly restarts an active Waynergy
+service. A stopped service reads the new setting on its next start.
 
 The panel also has a wheel-debounce switch. It is guarded by a binary
 capability check (looks for the debounce log marker), so the stock AUR binary
 leaves it unavailable; the custom fork (`0.0.17-6`) enables it and uses the
-last configured threshold or 100 ms when none is set.
+configured positive threshold. Turning the filter off writes zero. Enabling
+from zero selects 100 ms.
 
 The display watcher listens to Hyprland's v2 monitor add/remove events. It
 waits one second for the layout to settle, coalesces repeated notifications,
 then asks `waynergy-ctl refresh-display` to send `SIGUSR1` to the active
 Waynergy process. Waynergy documents that signal as an in-process re-exec, so
 its Wayland output state and Deskflow geometry are rebuilt without exercising
-systemd's restart/start-limit path.
+systemd's restart/start-limit path. The watcher delivers its final pending
+monitor event before exiting when the event stream closes.
 
 After installation, add the widget if it was not enabled automatically:
 

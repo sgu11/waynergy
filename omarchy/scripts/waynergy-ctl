@@ -19,55 +19,52 @@
 #
 # "실행 중"과 "연결됨"을 나누는 이유: 유닛은 Restart=always 라 서버가 죽어 있어도
 # active 로 남는다. 유닛 상태만 보면 입력이 안 오는데 초록불이 켜진다.
-# 연결 판정은 로그를 훑지 않고 실제 소켓을 본다 — waynergy 프로세스가 서버
-# host:port 로 ESTAB 소켓을 들고 있는지가 유일한 근거다.
+# 연결 판정은 유닛의 MainPID가 서버 host:port로 ESTAB 소켓을 소유하는지 본다.
 set -uo pipefail
 
 BIN=waynergy
 UNIT=waynergy.service
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/waynergy/config.ini"
 TLSDIR="${XDG_CONFIG_HOME:-$HOME/.config}/waynergy/tls"
+declare -A config=() unit=()
 
 notify() { command -v notify-send >/dev/null 2>&1 && notify-send -a waynergy "$1" "${2:-}"; }
 
 have_unit() { systemctl --user cat "$UNIT" >/dev/null 2>&1; }
 installed()  { command -v "$BIN" >/dev/null 2>&1 && have_unit; }
 
-# config.ini 파서. Waynergy의 INI 구현이 인식하는 주석 표시는 ';'다.
-# 섹션 밖 키(host/port)와 섹션 안 키를 "섹션.키" 로 평평하게 만든다.
-conf() {  # conf <섹션.키>  — 없으면 빈 문자열
-  awk -v want="$1" '
+read_config() {
+  local key value
+  config=()
+  [[ -r "$CONFIG" ]] || return 0
+  while IFS='=' read -r key value; do
+    config[$key]=$value
+  done < <(awk '
     /^[[:space:]]*;/ { next }
-    /^[[:space:]]*\[/ { sec = $0; gsub(/[][[:space:]]/, "", sec); next }
+    /^[[:space:]]*\[/ {
+      sec = $0; sub(/^[^[]*\[/, "", sec); sub(/\].*$/, "", sec)
+      sec = tolower(sec)
+      next
+    }
     /=/ {
-      key = $0; sub(/=.*/, "", key); gsub(/[[:space:]]/, "", key)
+      key = $0; sub(/=.*/, "", key); gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+      key = tolower(key)
       val = $0; sub(/[^=]*=/, "", val); sub(/;.*/, "", val)
       gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
-      full = (sec == "" ? key : sec "." key)
-      if (full == want) { print val; exit }
+      field = (sec == "" ? key : sec "." key)
+      if (sec == "raw-keymap" && key ~ /^([0-9]+|0x[0-9a-f]+)$/) n++
+      if (field ~ /^(host|port|xkb_key_offset|raw-keymap\.offset|mouse\.wheel_debounce_ms|wlr\.wheel_mult|tls\.(enable|tofu)|log\.level)$/ && !seen[field]++)
+        print field "=" val
     }
-  ' "$CONFIG" 2>/dev/null
-}
-
-# [raw-keymap] 의 명시 매핑 개수. offset 관련 키는 매핑이 아니므로 뺀다.
-raw_keymap_count() {
-  awk '
-    /^[[:space:]]*;/ { next }
-    /^[[:space:]]*\[/ { sec = $0; gsub(/[][[:space:]]/, "", sec); next }
-    sec == "raw-keymap" && /=/ {
-      key = $0; sub(/=.*/, "", key); gsub(/[[:space:]]/, "", key)
-      if (key ~ /^[0-9]+$/) n++
-    }
-    END { print n + 0 }
-  ' "$CONFIG" 2>/dev/null
+    END { print "keymapExplicit=" n + 0 }
+  ' "$CONFIG" 2>/dev/null)
 }
 
 effective_keymap_offset() {
-  local raw legacy
-  raw="$(conf raw-keymap.offset)"
-  legacy="$(conf xkb_key_offset)"
-  [[ "$raw" =~ ^-?[0-9]+$ ]] || raw=0
-  [[ "$legacy" =~ ^-?[0-9]+$ ]] || legacy=0
+  local raw="${config[raw-keymap.offset]-}" legacy="${config[xkb_key_offset]-}"
+  local number='^[+-]?(0[xX][[:xdigit:]]+|0[0-7]*|[1-9][0-9]*)$'
+  [[ "$raw" =~ $number ]] || raw=0
+  [[ "$legacy" =~ $number ]] || legacy=0
   printf '%s\n' "$((raw + legacy))"
 }
 
@@ -75,68 +72,85 @@ unit_prop() { systemctl --user show "$UNIT" -p "$1" --value 2>/dev/null; }
 
 # 서버와의 실제 TCP 연결. waynergy 프로세스가 소유한 ESTAB 소켓만 센다.
 connected() {
-  local host port out
-  host="$(conf host)"; port="$(conf port)"
-  [ -n "$host" ] && [ -n "$port" ] || return 1
-  # `ss ... | grep -q` 를 쓰지 않는다. grep -q 는 첫 일치에서 바로 닫고, 그러면
-  # ss 가 SIGPIPE 로 죽어 pipefail 이 파이프라인을 실패로 만든다. 출력이 짧으면
-  # ss 가 먼저 끝나 통과하므로 증상이 들쭉날쭉해진다. 이 저장소는 같은 함정을
-  # 이미 한 번 밟았다 — verify.sh 의 adguard 인증서 검사 주석 참고.
-  # 먼저 출력을 받아 두고 문자열로 검사한다.
-  out="$(ss -tnpH state established "dst $host:$port" 2>/dev/null)"
-  case "$out" in
-    *'"waynergy"'*) return 0 ;;
-  esac
-  return 1
+  local pid="${unit[MainPID]-}" host="${config[host]-localhost}" port="${config[port]-24800}" sockets
+  [[ "$pid" =~ ^[1-9][0-9]*$ && -n "$host" && -n "$port" ]] || return 1
+  [[ "$host" != *:* ]] || host="[$host]"
+  sockets=$(ss -tnpH state established "dst $host and dport = $port" 2>/dev/null) || return 1
+  [[ "$sockets" == *"pid=$pid,"* ]]
 }
 
-state() {
-  installed || return 3
-  [ "$(unit_prop ActiveState)" = "active" ] || return 2
+read_status() {
+  local key value properties
+  command -v "$BIN" >/dev/null || return 3
+  properties=$(systemctl --user show "$UNIT" -p LoadState -p ActiveState -p MainPID \
+    -p UnitFileState -p SubState -p ActiveEnterTimestamp -p ExecStart 2>/dev/null) || return 3
+  while IFS='=' read -r key value; do
+    [[ -n "$key" ]] && unit[$key]=$value
+  done <<< "$properties"
+  case "${unit[LoadState]-}" in loaded|masked) ;; *) return 3 ;; esac
+  [[ "${unit[ActiveState]-}" == active ]] || return 2
   connected && return 0
   return 1
 }
 
-json_bool() { [ "$1" -eq 0 ] && printf 'true' || printf 'false'; }
-json_str()  { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+json_string() {
+  local key=$1 value=$2
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  value=${value//$'\n'/\\n}
+  value=${value//$'\r'/\\r}
+  value=${value//$'\t'/\\t}
+  if [[ "$value" == *[$'\001'-$'\037']* ]]; then
+    local i char escaped result=""
+    for ((i = 0; i < ${#value}; ++i)); do
+      char=${value:i:1}
+      if [[ "$char" == [$'\001'-$'\037'] ]]; then
+        printf -v escaped '\\u%04x' "'$char"
+        result+=$escaped
+      else
+        result+=$char
+      fi
+    done
+    value=$result
+  fi
+  printf '"%s":"%s"' "$key" "$value"
+}
 
 info() {
-  local st active autostart conn ver
-  state; st=$?
-  [ "$(unit_prop ActiveState)" = "active" ]; active=$?
-  systemctl --user is-enabled --quiet "$UNIT" 2>/dev/null; autostart=$?
-  connected; conn=$?
-  ver="$(pacman -Q "$BIN" 2>/dev/null | awk '{print $2}')"
+  local st installed=false active=false conn=false autostart=false supported=false pinned=false
+  local ver="" version_output host="${config[host]-localhost}" level="${config[log.level]-}"
+  read_status; st=$?
+  ((st < 3)) && installed=true
+  ((st < 2)) && active=true
+  ((st == 0)) && conn=true
+  case "${unit[UnitFileState]-}" in
+    enabled|enabled-runtime|alias|static|indirect|generated|transient) autostart=true ;;
+  esac
+  if version_output=$(pacman -Q "$BIN" 2>/dev/null); then
+    read -r _ ver _ <<< "$version_output"
+  fi
+  debounce_supported && supported=true
+  [[ -f "$TLSDIR/hash/$host" ]] && pinned=true
   # 명령행 -L 이 있으면 그 값이 우선이고, 없으면 config 의 log/level 을 쓴다.
-  local level
-  level="$(unit_prop ExecStart | grep -oE '\-L (none|error|warn|info|debug|debugsyn|[0-6])' | awk '{print $2}')"
-  [ -n "$level" ] || level="$(conf log.level)"
+  local level_arg='-L[[:space:]]+(none|error|warn|info|debugsyn|debug|[0-6])([[:space:];}]|$)'
+  [[ "${unit[ExecStart]-}" =~ $level_arg ]] && level=${BASH_REMATCH[1]}
 
-  printf '{'
-  printf '"state":%d,' "$st"
-  printf '"installed":%s,' "$(installed; json_bool $?)"
-  printf '"active":%s,' "$(json_bool $active)"
-  printf '"connected":%s,' "$(json_bool $conn)"
-  printf '"autostart":%s,' "$(json_bool $autostart)"
-  printf '"version":"%s",' "$(json_str "$ver")"
-  printf '"unitState":"%s",' "$(json_str "$(unit_prop ActiveState)")"
-  printf '"subState":"%s",' "$(json_str "$(unit_prop SubState)")"
-  printf '"since":"%s",' "$(json_str "$(unit_prop ActiveEnterTimestamp)")"
-  printf '"host":"%s",' "$(json_str "$(conf host)")"
-  printf '"port":"%s",' "$(json_str "$(conf port)")"
-  printf '"wheelDebounceMs":"%s",' "$(json_str "$(conf mouse.wheel_debounce_ms)")"
-  printf '"wheelDebounceSupported":%s,' "$(debounce_supported; json_bool $?)"
-  printf '"wheelMult":"%s",' "$(json_str "$(conf wlr.wheel_mult)")"
-  # Waynergy adds raw-keymap/offset and the legacy global xkb_key_offset.
-  # Report the effective value so old and new config formats display alike.
-  printf '"keymapOffset":"%s",' "$(effective_keymap_offset)"
-  printf '"keymapExplicit":%s,' "$(raw_keymap_count)"
-  printf '"tls":"%s",' "$(json_str "$(conf tls.enable)")"
-  printf '"tofu":"%s",' "$(json_str "$(conf tls.tofu)")"
-  local pin
-  pin="$TLSDIR/hash/$(conf host)"
-  printf '"pinned":%s,' "$([ -f "$pin" ]; json_bool $?)"
-  printf '"logLevel":"%s"' "$(json_str "$level")"
+  printf '{"state":%d,"installed":%s,"active":%s,"connected":%s,"autostart":%s,' \
+    "$st" "$installed" "$active" "$conn" "$autostart"
+  printf '"wheelDebounceSupported":%s,"keymapExplicit":%s,"pinned":%s,' \
+    "$supported" "${config[keymapExplicit]:-0}" "$pinned"
+  json_string version "$ver"; printf ','
+  json_string unitState "${unit[ActiveState]-}"; printf ','
+  json_string subState "${unit[SubState]-}"; printf ','
+  json_string since "${unit[ActiveEnterTimestamp]-}"; printf ','
+  json_string host "$host"; printf ','
+  json_string port "${config[port]-24800}"; printf ','
+  json_string wheelDebounceMs "${config[mouse.wheel_debounce_ms]-}"; printf ','
+  json_string wheelMult "${config[wlr.wheel_mult]-}"; printf ','
+  json_string keymapOffset "$(effective_keymap_offset)"; printf ','
+  json_string tls "${config[tls.enable]-}"; printf ','
+  json_string tofu "${config[tls.tofu]-}"; printf ','
+  json_string logLevel "$level"
   printf '}\n'
 }
 
@@ -144,7 +158,7 @@ info() {
 # active/inactive 만 본다 — 연결(0)과 미연결(1) 둘 다 "켜짐"이기 때문이다.
 settled() {  # settled active|inactive
   local want=$1 i
-  for i in $(seq 1 12); do
+  for i in {1..12}; do
     local now; now="$(unit_prop ActiveState)"
     [ "$now" = "$want" ] && return 0
     sleep 0.25
@@ -160,9 +174,22 @@ settled() {  # settled active|inactive
 do_start() {
   systemctl --user reset-failed "$UNIT" >/dev/null 2>&1
   systemctl --user start "$UNIT" >/dev/null 2>&1
-  settled active || notify "시작 실패" "journalctl --user -u $UNIT -e"
+  confirm_state active "시작 실패"
 }
-do_stop()  { systemctl --user stop  "$UNIT" >/dev/null 2>&1; settled inactive || notify "정지 실패" "journalctl --user -u $UNIT -e"; }
+do_stop() {
+  systemctl --user stop "$UNIT" >/dev/null 2>&1
+  confirm_state inactive "정지 실패"
+}
+do_restart() {
+  systemctl --user reset-failed "$UNIT" >/dev/null 2>&1
+  systemctl --user restart "$UNIT" >/dev/null 2>&1
+  confirm_state active "재시작 실패"
+}
+confirm_state() {
+  settled "$1" && return 0
+  notify "$2" "journalctl --user -u $UNIT -e" || true
+  return 1
+}
 
 # Waynergy caches the compositor's output and virtual-input geometry. It normally
 # announces changes to the Deskflow server with DINF, but output removal can
@@ -179,108 +206,87 @@ refresh_display() {
 }
 
 debounce_supported() {
-  local bin out
-  bin="$(command -v "$BIN" 2>/dev/null || true)"
-  [ -n "$bin" ] || return 1
-  out="$(strings "$bin" 2>/dev/null || true)"
-  case "$out" in
-    *"Wheel debounce enabled"*) return 0 ;;
-  esac
-  return 1
+  local bin
+  bin=$(command -v "$BIN") || return 1
+  LC_ALL=C grep -aFq 'Wheel debounce enabled' "$bin" 2>/dev/null
 }
 
-set_wheel_debounce() {
-  local value="${1:-}" current target tmp backup
-  case "$value" in on|off) ;; *) echo "wheel debounce must be on or off" >&2; return 64 ;; esac
-  [ -f "$CONFIG" ] || { notify "설정 없음" "$CONFIG"; return 3; }
-  if [ "$value" = on ]; then
+# Serialize read/backup/replace/reload across concurrent wheel edits.
+set_wheel_option() (
+  local section=$1 key=$2 value=$3 current lock tmp backup
+  [[ -f "$CONFIG" ]] || { notify "설정 없음" "$CONFIG"; return 3; }
+  exec {lock}>>"$CONFIG.lock" && flock "$lock" || return 1
+  read_config
+  current=${config[$section.$key]-}
+  if [[ "$value" == on ]]; then
     debounce_supported || { notify "디바운스 패키지 필요" "패치된 waynergy를 설치하세요"; return 3; }
-    current="$(conf mouse.wheel_debounce_ms)"
-    target="$current"
-    [[ "$target" =~ ^[1-9][0-9]*$ ]] || target=100
-  else
-    target=0
+    value=100
+    [[ "$current" =~ ^[1-9][0-9]*$ ]] && value=$current
   fi
-  [ "$(conf mouse.wheel_debounce_ms)" = "$target" ] && return 0
+  [[ "$current" != "$value" ]] || return 0
+  installed || return 3
 
-  tmp="$(mktemp "${CONFIG}.tmp.XXXXXX")" || return 1
-  backup="${CONFIG}.bak.$(date +%Y%m%d%H%M%S)"
-  cp -p -- "$CONFIG" "$backup" || { rm -f -- "$tmp"; return 1; }
-  if ! awk -v value="$target" '
-    BEGIN { section=""; saw_mouse=0; wrote=0 }
+  tmp=$(mktemp "${CONFIG}.tmp.XXXXXX") || return 1
+  trap 'rm -f -- "$tmp"' EXIT
+  if ! awk -v section="$section" -v target="$key" -v value="$value" '
+    function write_setting() { print target "=" value; wrote = 1 }
     /^[[:space:]]*\[/ {
-      if (section == "mouse" && !wrote) { print "wheel_debounce_ms=" value; wrote=1 }
-      section=$0; gsub(/[][[:space:]]/, "", section)
-      if (section == "mouse") saw_mouse=1
+      if (sec == section && !wrote) write_setting()
+      sec = $0; sub(/^[^[]*\[/, "", sec); sub(/\].*$/, "", sec)
+      sec = tolower(sec)
     }
-    section == "mouse" && /^[[:space:]]*wheel_debounce_ms[[:space:]]*=/ {
-      if (!wrote) print "wheel_debounce_ms=" value
-      wrote=1
-      next
+    sec == section && /^[[:space:]]*[^;].*=/ {
+      key = $0; sub(/=.*/, "", key); gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+      if (tolower(key) == target) {
+        if (!wrote) write_setting()
+        next
+      }
     }
     { print }
     END {
-      if (section == "mouse" && !wrote) print "wheel_debounce_ms=" value
-      else if (!saw_mouse) { print ""; print "[mouse]"; print "wheel_debounce_ms=" value }
+      if (!wrote) {
+        if (sec != section) { print ""; print "[" section "]" }
+        write_setting()
+      }
     }
   ' "$CONFIG" >"$tmp"; then
-    rm -f -- "$tmp"
     return 1
   fi
-  chmod --reference="$CONFIG" "$tmp"
-  mv -- "$tmp" "$CONFIG"
+  chmod --reference="$CONFIG" "$tmp" || return 1
+  backup=$(mktemp "${CONFIG}.bak.$(date +%Y%m%d%H%M%S).XXXXXX") || return 1
+  cp -p -- "$CONFIG" "$backup" || { rm -f -- "$backup"; return 1; }
+  mv -Tf -- "$tmp" "$CONFIG" || return 1
 
-  installed || return 3
-  systemctl --user reset-failed "$UNIT" >/dev/null 2>&1
-  systemctl --user restart "$UNIT" >/dev/null 2>&1
-  settled active || { notify "디바운스 적용 실패" "journalctl --user -u $UNIT -e"; return 1; }
+  if ! systemctl --user try-restart "$UNIT"; then
+    if ! cp -p -- "$backup" "$tmp" || ! mv -Tf -- "$tmp" "$CONFIG"; then
+      printf 'Could not restore the previous configuration from %s\n' "$backup" >&2
+    fi
+    notify "휠 설정 적용 실패" "journalctl --user -u $UNIT -e" || true
+    return 1
+  fi
+)
+
+set_wheel_debounce() {
+  case "${1:-}" in
+    on) set_wheel_option mouse wheel_debounce_ms on ;;
+    off) set_wheel_option mouse wheel_debounce_ms 0 ;;
+    *) echo "wheel debounce must be on or off" >&2; return 64 ;;
+  esac
 }
 
 set_wheel_mult() {
-  local value="${1:-}" tmp backup
-  case "$value" in 1|2|3) ;; *) echo "wheel multiplier must be 1, 2, or 3" >&2; return 64 ;; esac
-  [ -f "$CONFIG" ] || { notify "설정 없음" "$CONFIG"; return 3; }
-  [ "$(conf wlr.wheel_mult)" = "$value" ] && return 0
-
-  tmp="$(mktemp "${CONFIG}.tmp.XXXXXX")" || return 1
-  backup="${CONFIG}.bak.$(date +%Y%m%d%H%M%S)"
-  cp -p -- "$CONFIG" "$backup" || { rm -f -- "$tmp"; return 1; }
-  if ! awk -v value="$value" '
-    BEGIN { section=""; saw_wlr=0; wrote=0 }
-    /^[[:space:]]*\[/ {
-      if (section == "wlr" && !wrote) { print "wheel_mult=" value; wrote=1 }
-      section=$0; gsub(/[][[:space:]]/, "", section)
-      if (section == "wlr") saw_wlr=1
-    }
-    section == "wlr" && /^[[:space:]]*wheel_mult[[:space:]]*=/ {
-      if (!wrote) print "wheel_mult=" value
-      wrote=1
-      next
-    }
-    { print }
-    END {
-      if (section == "wlr" && !wrote) print "wheel_mult=" value
-      else if (!saw_wlr) { print ""; print "[wlr]"; print "wheel_mult=" value }
-    }
-  ' "$CONFIG" >"$tmp"; then
-    rm -f -- "$tmp"
-    return 1
-  fi
-  chmod --reference="$CONFIG" "$tmp"
-  mv -- "$tmp" "$CONFIG"
-
-  installed || return 3
-  systemctl --user reset-failed "$UNIT" >/dev/null 2>&1
-  systemctl --user restart "$UNIT" >/dev/null 2>&1
-  settled active || { notify "휠 배수 적용 실패" "journalctl --user -u $UNIT -e"; return 1; }
+  case "${1:-}" in
+    1|2|3) set_wheel_option wlr wheel_mult "$1" ;;
+    *) echo "wheel multiplier must be 1, 2, or 3" >&2; return 64 ;;
+  esac
 }
 
 case "${1:-state}" in
-  state) state; exit $? ;;
-  info)  info; exit 0 ;;
+  state) read_config; read_status; exit $? ;;
+  info)  read_config; info ;;
   start) installed || { notify "waynergy 없음" "yay -S waynergy"; exit 3; }; do_start ;;
   stop)  do_stop ;;
-  restart) installed || exit 3; systemctl --user reset-failed "$UNIT" >/dev/null 2>&1; systemctl --user restart "$UNIT" >/dev/null 2>&1; settled active || notify "재시작 실패" "journalctl --user -u $UNIT -e" ;;
+  restart) installed || exit 3; do_restart ;;
   refresh-display) refresh_display ;;
   toggle)
     installed || { notify "waynergy 없음" "yay -S waynergy"; exit 3; }

@@ -34,7 +34,8 @@ settings, and key mapping in one place.
 subscribes to Hyprland's event socket and consumes only `monitoraddedv2` and
 `monitorremovedv2`, because Hyprland also emits legacy duplicates. A one-second
 resettable timer lets the final monitor layout settle before it calls
-`waynergy-ctl refresh-display`.
+`waynergy-ctl refresh-display`. An ended event stream drains the pending
+refresh. Stopping the watcher cancels it.
 
 The refresh sends Waynergy's documented `SIGUSR1` re-exec signal to the unit's
 main process only when `waynergy.service` is active. This is preferable to a
@@ -63,10 +64,10 @@ configuration comments in that form, particularly when a comment contains
 ## Live state and safe control
 
 `waynergy-ctl` is the single state and mutation boundary used by the panel and
-doctor. It distinguishes an active systemd unit from a live server connection
-by checking whether the Waynergy process owns an established socket to the
-configured `host:port`. Historical journal entries are not current connection
-evidence.
+doctor. Each query reads systemd's active state and main PID together and
+checks that PID for an established socket to the configured `host:port`.
+The resulting connection indicator represents TCP establishment. Waynergy
+then completes TLS and the Deskflow protocol handshake and awaits screen entry.
 
 Service state and login autostart are separate controls. Before starting,
 `waynergy-ctl` clears a possible systemd start-limit failure and verifies the
@@ -76,22 +77,25 @@ session's remote input path.
 
 Routine status refresh is deliberately invisible. The earlier bar widget
 treated its polling processes as a visual busy state and lowered icon opacity
-while each process ran, causing a brief flicker every five seconds. The current
-panel retains the last complete state until the next JSON snapshot arrives;
-only a user-requested service mutation uses optimistic visual state.
+while each process ran, causing a brief flicker every five seconds. The panel
+finishes an in-flight status query before issuing a mutation and retains the
+requested value until the first status query after the command completes.
 
 The panel also exposes a three-value wheel multiplier selector (`×1`, `×2`,
 `×3`). `waynergy-ctl set-wheel-mult` validates the value, preserves the rest
-of `config.ini`, writes a timestamped backup, replaces the setting through a
-same-directory temporary file, and restarts Waynergy. The repository default
-is `3`; changing it can briefly interrupt remote input while the client
-reconnects.
+of `config.ini`, writes a unique timestamped backup, and replaces the setting
+through a same-directory temporary file. Both wheel controls share one file
+lock. They use `try-restart` so a running client reloads its settings and a
+stopped client applies them at the next start. If the restart command fails,
+the helper restores the previous file and returns an error. The installer
+defaults to `3`.
 
 The panel's wheel-debounce switch is guarded by a binary capability check. The
 helper looks for the patched binary's debounce log marker, so a stock AUR
 installation cannot appear enabled while silently ignoring the setting. On a
 patched build, enabling preserves the configured threshold (or selects 100 ms
-if it was unset); disabling writes zero and both transitions restart Waynergy.
+if it was unset). Disabling writes zero. Both follow the same apply and backup
+path as the multiplier.
 
 ## Custom fork (`packaging/waynergy-custom`)
 

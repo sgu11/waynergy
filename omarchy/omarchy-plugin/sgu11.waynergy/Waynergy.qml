@@ -3,6 +3,7 @@ import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // waynergy 바 위젯 — 상태 표시 + 왼쪽 클릭으로 여는 패널(서비스 토글,
@@ -27,32 +28,34 @@ Panel {
   manageIpc: false
 
   property var info: ({})
-  property bool busyService: false
-  property bool busyAutostart: false
-  property bool busyWheel: false
-  property bool busyDebounce: false
-  property bool optimisticActive: false
-  property bool optimisticAutostart: false
-  property string optimisticWheelMult: "1"
-  property bool optimisticDebounce: false
+  property var action: null
+  property string actionPhase: "idle"
+  property bool readingStatus: false
+  property bool refreshPending: false
   property int cursorIndex: 0          // 0 = 서비스, 1 = 자동 시작, 2 = 디바운스, 3 = 휠 배수
   property int wheelChoiceIndex: 0
   property bool cursorActive: false
-  property bool refreshPending: false
 
   readonly property bool installed: info.installed === true
-  readonly property bool svcActive: busyService ? optimisticActive : info.active === true
+  readonly property bool busyService: action !== null && action.kind === "service"
+  readonly property bool svcActive: busyService ? action.value : info.active === true
   readonly property bool connected: !busyService && info.connected === true
-  readonly property bool autostart: busyAutostart ? optimisticAutostart : info.autostart === true
+  readonly property bool autostart: action && action.kind === "autostart" ? action.value : info.autostart === true
   readonly property bool debounceSupported: info.wheelDebounceSupported === true
-  readonly property bool debounceEnabled: busyDebounce
-    ? optimisticDebounce
-    : (info.wheelDebounceMs !== undefined && info.wheelDebounceMs !== ""
-       && info.wheelDebounceMs !== "0")
-  readonly property string wheelMult: busyWheel ? optimisticWheelMult : (info.wheelMult || "1")
-  readonly property string server: (info.host || "?") + ":" + (info.port || "?")
+  readonly property real debounceMs: Number(info.wheelDebounceMs) || 0
+  readonly property bool debounceEnabled: action && action.kind === "debounce" ? action.value : debounceMs > 0
+  readonly property string wheelMult: action && action.kind === "wheel" ? action.value : (info.wheelMult || "1")
+  readonly property string server: {
+    const host = info.host || "?"
+    return (host.includes(":") ? "[" + host + "]" : host) + ":" + (info.port || "?")
+  }
+  readonly property string tlsStatus: {
+    if (!/yes|true|on/.test(info.tls || "")) return "꺼짐"
+    const mode = /yes|true|on/.test(info.tofu || "") ? "TOFU" : "서버 지문 확인"
+    return mode + (info.pinned === true ? " · 지문 고정됨" : " · 지문 없음")
+  }
 
-  readonly property color foreground: bar ? bar.foreground : Color.foreground
+  readonly property color foreground: bar ? bar.foreground : Commons.Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
@@ -79,54 +82,82 @@ Panel {
   implicitHeight: button.implicitHeight
 
   function refresh() {
-    if (!infoProc.running) infoProc.running = true
-    else refreshPending = true
+    refreshPending = true
+    advance()
   }
 
-  function runAction(arg, value) {
-    if (actionProc.running) return
-    actionProc.command = value === undefined
-      ? ["waynergy-ctl", arg]
-      : ["waynergy-ctl", arg, value]
-    actionProc.running = true
+  function advance() {
+    // A mutation starts after the current read and finishes with a fresh read.
+    if (readingStatus || actionPhase === "running") return
+    if (actionPhase === "queued") {
+      actionPhase = "running"
+      actionProc.command = action.command
+      actionProc.running = true
+    } else if (refreshPending) {
+      refreshPending = false
+      readingStatus = true
+      infoProc.running = true
+    }
+  }
+
+  function finishStatus(code, text) {
+    if (!readingStatus) return
+    readingStatus = false
+    let snapshot = null
+    if (code === 0) {
+      try { snapshot = JSON.parse(text) } catch (error) {}
+    }
+    info = (snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)) ? snapshot : ({})
+    if (actionPhase === "confirming") {
+      action = null
+      actionPhase = "idle"
+    }
+    Qt.callLater(advance)
+  }
+
+  function finishAction() {
+    if (actionPhase !== "running") return
+    actionPhase = "confirming"
+    refreshPending = true
+    Qt.callLater(advance)
+    settle.restart()
+  }
+
+  function runAction(kind, value, args) {
+    if (!installed || action !== null) return
+    action = { kind: kind, value: value, command: ["waynergy-ctl"].concat(args) }
+    actionPhase = "queued"
+    advance()
   }
 
   function toggleService() {
-    if (!installed || busyService || actionProc.running) return
-    optimisticActive = !svcActive
-    busyService = true
-    runAction("toggle")
+    const start = !svcActive
+    runAction("service", start, [start ? "start" : "stop"])
   }
 
   function toggleAutostart() {
-    if (!installed || busyAutostart || actionProc.running) return
-    optimisticAutostart = !autostart
-    busyAutostart = true
-    runAction("autostart")
+    const enable = !autostart
+    runAction("autostart", enable, [enable ? "enable" : "disable"])
   }
 
   function setWheelMult(value) {
-    if (!installed || busyWheel || actionProc.running
-        || ["1", "2", "3"].indexOf(String(value)) < 0) return
-    if (wheelMult === String(value)) return
-    optimisticWheelMult = String(value)
+    value = String(value)
+    if (!installed || action !== null || ["1", "2", "3"].indexOf(value) < 0 || wheelMult === value) return
     wheelChoiceIndex = Number(value) - 1
-    busyWheel = true
-    runAction("set-wheel-mult", String(value))
+    runAction("wheel", value, ["set-wheel-mult", value])
   }
 
   function toggleDebounce() {
-    if (!installed || !debounceSupported || busyDebounce || actionProc.running) return
-    optimisticDebounce = !debounceEnabled
-    busyDebounce = true
-    runAction("set-wheel-debounce", debounceEnabled ? "off" : "on")
+    if (!debounceSupported) return
+    const enable = !debounceEnabled
+    runAction("debounce", enable, ["set-wheel-debounce", enable ? "on" : "off"])
   }
 
   function moveCursor(dx, dy) {
     cursorActive = true
     if (dy !== 0) {
       cursorIndex = Math.max(0, Math.min(3, cursorIndex + dy))
-      if (cursorIndex === 3) wheelChoiceIndex = Math.max(0, Number(wheelMult) - 1)
+      if (cursorIndex === 3) wheelChoiceIndex = Math.max(0, ["1", "2", "3"].indexOf(wheelMult))
     } else if (cursorIndex === 3 && dx !== 0) {
       wheelChoiceIndex = Math.max(0, Math.min(2, wheelChoiceIndex + dx))
     }
@@ -164,38 +195,16 @@ Panel {
   Process {
     id: infoProc
     command: ["waynergy-ctl", "info"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        var raw = String(text || "").trim()
-        var pending = root.refreshPending
-        root.refreshPending = false
-        if (raw === "") return
-        try {
-          root.info = JSON.parse(raw)
-        } catch (e) {
-          // 파싱이 깨지면 마지막으로 읽은 상태를 지운다. 낡은 값을 계속
-          // 보여주는 편이 더 나쁘다 — 꺼진 서비스를 켜져 있다고 말한다.
-          root.info = ({})
-        }
-        if (pending) root.refresh()
-      }
-    }
+    stdout: StdioCollector { id: infoOutput; waitForEnd: true }
+    onExited: function (code) { root.finishStatus(code, infoOutput.text) }
+    // An executable that fails to start emits runningChanged without exited.
+    onRunningChanged: if (!running) root.finishStatus(-1, "")
   }
 
   Process {
     id: actionProc
-    command: ["waynergy-ctl", "state"]
-    // waynergy-ctl 이 상태 전환을 확인하고 나서 끝나므로, 끝난 직후 값이
-    // 이미 맞다. 연결(TCP)은 조금 늦게 서므로 한 번 더 읽는다.
-    onExited: {
-      root.busyService = false
-      root.busyAutostart = false
-      root.busyWheel = false
-      root.busyDebounce = false
-      root.refresh()
-      settle.restart()
-    }
+    onExited: root.finishAction()
+    onRunningChanged: if (!running) root.finishAction()
   }
 
   Timer {
@@ -367,7 +376,7 @@ Panel {
             label: "휠 디바운스"
             description: root.debounceSupported
               ? (root.debounceEnabled
-                  ? "반대 방향 노치 필터 · " + (root.info.wheelDebounceMs || "100") + " ms"
+                  ? "반대 방향 노치 필터 · " + (root.debounceMs > 0 ? root.debounceMs : 100) + " ms"
                   : "반대 방향 노치 필터 · 꺼짐")
               : "패치된 waynergy 패키지가 필요합니다"
             checked: root.debounceEnabled
@@ -407,9 +416,9 @@ Panel {
               ButtonGroup {
                 id: wheelChoices
                 options: [
-                  { value: "1", label: "×1", tooltip: "휠 배수를 1로 적용하며 waynergy가 잠시 재시작됩니다" },
-                  { value: "2", label: "×2", tooltip: "휠 배수를 2로 적용하며 waynergy가 잠시 재시작됩니다" },
-                  { value: "3", label: "×3", tooltip: "휠 배수를 3으로 적용하며 waynergy가 잠시 재시작됩니다" }
+                  { value: "1", label: "×1", tooltip: "휠 배수를 1로 설정합니다. 실행 중인 Waynergy가 잠시 재시작됩니다" },
+                  { value: "2", label: "×2", tooltip: "휠 배수를 2로 설정합니다. 실행 중인 Waynergy가 잠시 재시작됩니다" },
+                  { value: "3", label: "×3", tooltip: "휠 배수를 3으로 설정합니다. 실행 중인 Waynergy가 잠시 재시작됩니다" }
                 ]
                 value: root.wheelMult
                 cursorIndex: root.cursorActive && root.cursorIndex === 3 ? root.wheelChoiceIndex : -1
@@ -449,9 +458,7 @@ Panel {
             }
             InfoRow {
               label: "휠 디바운스"
-              value: root.info.wheelDebounceMs === undefined || root.info.wheelDebounceMs === ""
-                     ? "꺼짐"
-                     : (root.info.wheelDebounceMs === "0" ? "꺼짐" : root.info.wheelDebounceMs + " ms")
+            value: root.debounceMs > 0 ? root.debounceMs + " ms" : "꺼짐"
             }
             InfoRow {
               label: "휠 배수"
@@ -464,9 +471,7 @@ Panel {
             }
             InfoRow {
               label: "TLS"
-              value: root.info.tls === "true"
-                     ? ("TOFU" + (root.info.pinned === true ? " · 지문 고정됨" : " · 지문 없음"))
-                     : "꺼짐"
+              value: root.tlsStatus
             }
             InfoRow {
               label: "로그 레벨"

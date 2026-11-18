@@ -13,10 +13,13 @@ if [[ ! "$settle_seconds" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
 fi
 
 cleanup() {
-  if [[ -n "$pending_pid" ]] && kill -0 "$pending_pid" 2>/dev/null; then
-    kill "$pending_pid" 2>/dev/null || true
-    wait "$pending_pid" 2>/dev/null || true
+  [[ -n "$pending_pid" ]] || return 0
+  # Cancel the shell's pending job. Its stored PID can outlive the job.
+  if [[ "$(jobs -pr)" == "$pending_pid" ]]; then
+    kill %+ 2>/dev/null || true
   fi
+  wait "$pending_pid" 2>/dev/null || true
+  pending_pid=""
 }
 trap cleanup EXIT
 trap 'exit 0' INT TERM
@@ -24,10 +27,7 @@ trap 'exit 0' INT TERM
 schedule_refresh() {
   # Hyprland can emit several layout notifications while outputs settle. Keep
   # moving one timer forward so Waynergy sees the final topology only once.
-  if [[ -n "$pending_pid" ]] && kill -0 "$pending_pid" 2>/dev/null; then
-    kill "$pending_pid" 2>/dev/null || true
-    wait "$pending_pid" 2>/dev/null || true
-  fi
+  cleanup
 
   (
     sleep "$settle_seconds"
@@ -52,3 +52,11 @@ while IFS= read -r event; do
     monitoraddedv2\>\>*|monitorremovedv2\>\>*) schedule_refresh ;;
   esac
 done < <(socat -U - "UNIX-CONNECT:$socket")
+
+# The final layout event still counts when the compositor closes the stream.
+if [[ -n "$pending_pid" ]]; then
+  wait "$pending_pid"
+  result=$?
+  pending_pid=""
+  exit "$result"
+fi

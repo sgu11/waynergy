@@ -89,3 +89,12 @@ modifier-release ordering, normal held-key repeat, and no growth after release.
 An unreproduced intermittent failure remains unconfirmed after synthetic checks.
 See `docs/ime-shortcut.md` for setup, terminal-prefix conflicts, and the Omarchy
 input-setup behavior that can remove the native Fcitx trigger.
+
+# Panel state and wheel updates
+
+Read ActiveState and MainPID in the same systemd sample and match that PID in
+the live socket output. Preserve the JSON fields and state exit codes 0–3.
+Keep wheel mutations serialized across the read, backup, replace, and apply
+steps. Use systemd try-restart so settings edits respect an explicitly stopped
+service. In Quickshell, a failed Process spawn can signal runningChanged without
+exited. Verify both completion paths and the post-action status read.
