@@ -76,6 +76,7 @@ struct wlInput {
 	bool *id_keymap_valid;
 	/* mouse button map */
 	int button_map[WL_INPUT_BUTTON_COUNT];
+	bool button_pressed[WL_INPUT_BUTTON_COUNT];
 	/* wayland context */
 	struct wlContext *wl_ctx;
 	/* actual functions */
@@ -167,8 +168,8 @@ extern void wlMouseWheel(struct wlContext *context, signed short dx, signed shor
 extern void wlKeyRaw(struct wlContext *context, int key, int state);
 /* send a keycode or id, mapping as needed. Prefers the id value. */
 extern void wlKey(struct wlContext *context, int key, int id, int state);
-/* release all currently-pressed keys, usually on exiting the screen */
-extern void wlKeyReleaseAll(struct wlContext *context);
+/* release injected keys and buttons when leaving the screen or disconnecting */
+extern void wlInputReleaseAll(struct wlContext *context);
 
 /* enable or disable idle inhibition */
 extern void wlIdleInhibit(struct wlContext *context, bool on);

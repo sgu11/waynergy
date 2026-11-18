@@ -236,6 +236,18 @@ static void output_scale(void *data, struct wl_output *wl_output, int32_t factor
 	output->complete = false;
 	output->scale = factor;
 }
+
+static void notify_outputs_ready(struct wlContext *ctx)
+{
+	if (!ctx->on_output_update)
+		return;
+	for (struct wlOutput *output = ctx->outputs; output; output = output->next) {
+		if (!output->complete)
+			return;
+	}
+	ctx->on_output_update(ctx);
+}
+
 static void output_done(void *data, struct wl_output *wl_output)
 {
 	struct wlContext *ctx = data;
@@ -258,16 +270,7 @@ static void output_done(void *data, struct wl_output *wl_output)
 			output->y,
 			output->scale);
 
-	/* fire event if all outputs are complete. */
-	bool complete = true;
-	for (output = ctx->outputs; output; output = output->next) {
-		complete = complete && output->complete;
-	}
-	if (complete) {
-		logDbg("All outputs updated, triggering event");
-		if (ctx->on_output_update)
-			ctx->on_output_update(ctx);
-	}
+	notify_outputs_ready(ctx);
 }
 
 static void xdg_output_pos(void *data, struct zxdg_output_v1 *xdg_output, int32_t x, int32_t y)
@@ -484,7 +487,7 @@ static void handle_global_remove(void *data, struct wl_registry *registry, uint3
 	if (output) {
 		logInfo("Lost output %s", output->name ? output->name : "");
 		wlOutputRemove(&ctx->outputs, output);
-		ctx->on_output_update(ctx);
+		notify_outputs_ready(ctx);
 	}
 }
 
@@ -506,7 +509,10 @@ uint32_t wlTS(struct wlContext *ctx)
 
 void wlClose(struct wlContext *ctx)
 {
-	return;
+	if (ctx->display) {
+		wl_display_disconnect(ctx->display);
+		ctx->display = NULL;
+	}
 }
 
 bool wlSetup(struct wlContext *ctx, int width, int height, char *backend)

@@ -173,8 +173,10 @@ USAGE: ./waynergy [-h|--help] [-v|--version] [-b|--backend backend] [-c|--host h
 For each option that is also present in the configuration file, the applicable
 name is given in `[]`.
 
-Also note that `SIGUSR1` triggers re-execution. Useful until proper reconnect
-procedures exist. 
+`SIGUSR1` re-executes the process and reloads its configuration and Wayland
+state. A transport disconnect clears session state and releases held input
+before the client reconnects. The `--fatal-*` options select disconnects that
+end the process instead.
 ### Configuration
 By default, the configuration files are stored in `$XDG_CONFIG_HOME/waynergy`, 
 which is probably at `~/.config/waynergy` in most cases. This can be
@@ -305,8 +307,8 @@ it when it is deactivated.
 
 #### Enter/Exit events
 
-`screen/enter` and `screen/exit` should contain a command to be run when the 
-screen is entered or exited, respectively.
+`screen/enter` runs on `CINN` and `screen/exit` runs on `COUT`. Waynergy waits
+for these commands and logs a nonzero exit status.
 
 #### Idle inhibition hack
 

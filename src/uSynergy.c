@@ -46,15 +46,11 @@ freely, subject to the following restrictions:
 /**
 @brief Read 32 bit integer in network byte order and convert to native byte order
 **/
-static int32_t sNetToNative32(const unsigned char *value)
+static uint32_t sNetToNative32(const unsigned char *value)
 {
-#ifdef USYNERGY_LITTLE_ENDIAN
-	return value[3] | (value[2] << 8) | (value[1] << 16) | (value[0] << 24);
-#else
-	return value[0] | (value[1] << 8) | (value[2] << 16) | (value[3] << 24);
-#endif
+	return ((uint32_t)value[0] << 24) | ((uint32_t)value[1] << 16) |
+	       ((uint32_t)value[2] << 8) | value[3];
 }
-
 
 
 
@@ -129,16 +125,25 @@ static bool sAddUInt32(uSynergyContext *context, uint32_t value)
 /**
 @brief Mark context as being disconnected
 **/
-static void sSetDisconnected(uSynergyContext *context, enum uSynergyError err)
+void uSynergyDisconnect(uSynergyContext *context, enum uSynergyError err)
 {
 	context->m_connected		= false;
 	context->m_hasReceivedHello = false;
+	context->m_implementation = NULL;
+	context->m_infoCurrent = false;
 	context->m_isCaptured		= false;
 	context->m_receiveOfs = 0;
 	context->m_replyCur			= context->m_replyBuffer + 4;
 	context->m_sequenceNumber	= 0;
 	context->m_protocolMinor = USYNERGY_PROTOCOL_MINOR;
 	context->m_lastError = err;
+	for (int id = 0; id < 2; ++id) {
+		if (context->m_clipInStream[id])
+			context->m_clipPos[id] = 0;
+		context->m_clipInStream[id] = false;
+		context->m_clipPosExpect[id] = 0;
+		context->m_clipGrabPending[id] = context->m_clipGrabbed[id];
+	}
 }
 
 /**
@@ -337,12 +342,12 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 		if (server_major != USYNERGY_PROTOCOL_MAJOR || server_minor < 6) {
 			logErr("Unsupported server protocol %u.%u (requires 1.6 or newer 1.x)",
 					(unsigned)server_major, (unsigned)server_minor);
-			sSetDisconnected(context, USYNERGY_ERROR_EBAD);
+			uSynergyDisconnect(context, USYNERGY_ERROR_EBAD);
 			return;
 		}
 		/* Never advertise a minor version newer than the server supports. */
 		context->m_protocolMinor = USYNERGY_PROTOCOL_MINOR;
-		if (server_major == USYNERGY_PROTOCOL_MAJOR && server_minor < context->m_protocolMinor)
+		if (server_minor < context->m_protocolMinor)
 			context->m_protocolMinor = server_minor;
 		logInfo("Server is %s %" PRIu16 ".%" PRIu16 ", answering as %d.%" PRIu16,
 				imp, server_major, server_minor,
@@ -363,7 +368,7 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 		{
 			// Send reply failed, let's try to reconnect
 			logErr("SendReply failed, trying to reconnect in a second");
-			context->m_connected = false;
+			uSynergyDisconnect(context, USYNERGY_ERROR_TIMEOUT);
 			context->m_sleepFunc(context->m_cookie, 1000);
 		}
 		else
@@ -448,7 +453,7 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 
 		// Send clipboard data
 		for (int id = 0; id < 2; ++id) {
-			if (context->m_clipGrabbed[id]) {
+			if (context->m_clipGrabbed[id] && !context->m_clipGrabPending[id]) {
 				uSynergySendClipboard(context, id, context->m_clipPos[id], context->m_clipBuf[id]);
 				context->m_clipGrabbed[id] = false;
 			}
@@ -671,6 +676,7 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 		}
 		/* XXX: I think the sequence number is always zero on receive?*/
 		context->m_clipGrabbed[id] = false;
+		context->m_clipGrabPending[id] = false;
 	}
 	else if (!strcmp(pkt_id, "DCLP"))
 	{
@@ -698,6 +704,7 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 		}
 		if (mark ==  SYN_DATA_START) {
 			context->m_clipGrabbed[id] = false;
+			context->m_clipGrabPending[id] = false;
 			context->m_clipInStream[id] = true;
 			context->m_clipPos[id] = 0;
 			char expected_len[len + 1];
@@ -705,20 +712,28 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 			expected_len[len] = '\0';
 			context->m_clipPosExpect[id] = atoi(expected_len);
 			if (context->m_clipPosExpect[id] > context->m_clipLen[id]) {
-				context->m_clipBuf[id] = xrealloc(context->m_clipBuf[id], context->m_clipPosExpect[id]);
+				context->m_clipLen[id] = context->m_clipPosExpect[id];
+				context->m_clipBuf[id] = xrealloc(context->m_clipBuf[id], context->m_clipLen[id]);
 			}
 		} else if (mark == SYN_DATA_CHUNK && context->m_clipInStream[id]) {
 			if ((context->m_clipPos[id] + len) > context->m_clipPosExpect[id]) {
 				logErr("Packet too long!");
 				return;
 			}
-			sspMemMove(context->m_clipBuf[id] + context->m_clipPos[id], msg, len);
+			if (!sspMemMove(context->m_clipBuf[id] + context->m_clipPos[id], msg, len)) {
+				PARSE_ERROR();
+			}
 			context->m_clipPos[id] += len;
 		} else if (mark ==  SYN_DATA_END && context->m_clipInStream[id]) {
+			context->m_clipInStream[id] = false;
+			if (context->m_clipPos[id] != context->m_clipPosExpect[id]) {
+				context->m_clipPos[id] = 0;
+				PARSE_ERROR();
+			}
 			struct sspBuf clipmsg = {
 				.data = context->m_clipBuf[id],
 				.pos = 0,
-				.len = context->m_clipPosExpect[id]
+				.len = context->m_clipPos[id]
 			};
 			uint32_t num_formats, format, size;
 			if (!sspNetU32(&clipmsg, &num_formats)) {
@@ -744,7 +759,6 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 					PARSE_ERROR();
 				}
 			}
-			context->m_clipInStream[id] = false;
 		}
 	}
 	else if (!strcmp(pkt_id, "DFTR") || !strcmp(pkt_id, "DDRG"))
@@ -769,7 +783,7 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 	}
 	else if (!strcmp(pkt_id, "CBYE")) {
 		logInfo("Server disconnected");
-		sSetDisconnected(context, USYNERGY_ERROR_NONE);
+		uSynergyDisconnect(context, USYNERGY_ERROR_NONE);
 		return;
 	}
 	else if (!strcmp(pkt_id, "EICV")) {
@@ -778,22 +792,22 @@ static void sProcessMessage(uSynergyContext *context, struct sspBuf *msg)
 			PARSE_ERROR();
 		}
 		logErr("Incompatible protocol version %u.%u", (unsigned)major, (unsigned)minor);
-		sSetDisconnected(context, USYNERGY_ERROR_EBAD);
+		uSynergyDisconnect(context, USYNERGY_ERROR_EBAD);
 		return;
 	}
 	else if (!strcmp(pkt_id, "EUNK")) {
 		logErr("Unknown client name (server has no such screen)");
-		sSetDisconnected(context, USYNERGY_ERROR_EBAD);
+		uSynergyDisconnect(context, USYNERGY_ERROR_EBAD);
 		return;
 	}
 	else if (!strcmp(pkt_id, "EBAD")) {
 		logErr("Protocol error");
-		sSetDisconnected(context, USYNERGY_ERROR_EBAD);
+		uSynergyDisconnect(context, USYNERGY_ERROR_EBAD);
 		return;
 	}
 	else if (!strcmp(pkt_id, "EBSY")) {
 		logErr("Other screen already connected with our name");
-		sSetDisconnected(context, USYNERGY_ERROR_EBSY);
+		uSynergyDisconnect(context, USYNERGY_ERROR_EBSY);
 		return;
 	}
 	else
@@ -840,7 +854,7 @@ static void sUpdateContext(uSynergyContext *context)
 		/* Receive failed, let's try to reconnect */
 		logErr("Receive failed (%d bytes asked, %d bytes received), trying to reconnect in a second", receive_size, num_received);
 		/* The *only* way this can occur normally is with a timeout so that's what we assume*/
-		sSetDisconnected(context, USYNERGY_ERROR_TIMEOUT);
+		uSynergyDisconnect(context, USYNERGY_ERROR_TIMEOUT);
 		context->m_sleepFunc(context->m_cookie, 1000);
 		return;
 	}
@@ -859,63 +873,48 @@ static void sUpdateContext(uSynergyContext *context)
 		if (num_received == 0)
 		{
 			/* Timeout after 2 secs of inactivity (we received no CALV) */
-			if ((int32_t)(cur_time - context->m_lastMessageTime) > USYNERGY_IDLE_TIMEOUT)
-				sSetDisconnected(context, USYNERGY_ERROR_TIMEOUT);
+			if ((int32_t)(cur_time - context->m_lastMessageTime) > USYNERGY_IDLE_TIMEOUT) {
+				uSynergyDisconnect(context, USYNERGY_ERROR_TIMEOUT);
+				return;
+			}
 		}
 		else
 			context->m_lastMessageTime = cur_time;
 	}
 
-	/* Eat packets */
-	for (;;)
-	{
-		/* Grab packet length and bail out if the packet goes beyond the end of the buffer */
-		packlen = sNetToNative32(context->m_receiveBuffer);
-		if (packlen+4 > context->m_receiveOfs)
+	/* Process complete frames in order, then keep only the incomplete tail. */
+	size_t received = context->m_receiveOfs;
+	size_t consumed = 0;
+	while (received - consumed >= 4) {
+		uint8_t *frame = context->m_receiveBuffer + consumed;
+		packlen = sNetToNative32(frame);
+		if (packlen > received - consumed - 4)
 			break;
 
-		/* Process message */
-		struct sspBuf msg = {
-			.data = context->m_receiveBuffer + 4,
-			.pos = 0,
-			.len = packlen
-		};
+		struct sspBuf msg = {.data = frame + 4, .pos = 0, .len = packlen};
 		sProcessMessage(context, &msg);
-
-		/* if we've lost the connection, don't bother with further
-		 * processing */
 		if (!context->m_connected)
 			return;
-
-		/* Move packet to front of buffer */
-		memmove(context->m_receiveBuffer, context->m_receiveBuffer+packlen+4, context->m_receiveOfs-packlen-4);
-		context->m_receiveOfs -= packlen+4;
+		consumed += packlen + 4;
+	}
+	if (consumed) {
+		context->m_receiveOfs = received - consumed;
+		memmove(context->m_receiveBuffer, context->m_receiveBuffer + consumed, context->m_receiveOfs);
 	}
 
-	/* Throw away over-sized packets */
-	if (packlen > USYNERGY_RECEIVE_BUFFER_SIZE)
-	{
-		/* Oversized packet, ditch tail end */
-		logWarn("Oversized packet: '%c%c%c%c' (length %d)", context->m_receiveBuffer[4], context->m_receiveBuffer[5], context->m_receiveBuffer[6], context->m_receiveBuffer[7], packlen);
-		num_received = context->m_receiveOfs-4; // 4 bytes for the size field
-		while (num_received != packlen)
-		{
-			int buffer_left = packlen - num_received;
-			int to_receive = buffer_left < USYNERGY_RECEIVE_BUFFER_SIZE ? buffer_left : USYNERGY_RECEIVE_BUFFER_SIZE;
-			int ditch_received = 0;
-			if (context->m_receiveFunc(context->m_cookie, context->m_receiveBuffer, to_receive, &ditch_received) == false)
-			{
-				/* Receive failed, let's try to reconnect */
+	if (context->m_receiveOfs >= 4 && packlen > USYNERGY_RECEIVE_BUFFER_SIZE - 4) {
+		logWarn("Oversized packet (length %" PRIu32 ")", packlen);
+		uint32_t remaining = packlen - (context->m_receiveOfs - 4);
+		while (remaining) {
+			int to_receive = remaining < USYNERGY_RECEIVE_BUFFER_SIZE ? remaining : USYNERGY_RECEIVE_BUFFER_SIZE;
+			int discarded = 0;
+			if (!context->m_receiveFunc(context->m_cookie, context->m_receiveBuffer, to_receive, &discarded) || discarded <= 0) {
 				logErr("Receive failed, trying to reconnect in a second");
-				/* this only happens with timeout*/
-				sSetDisconnected(context, USYNERGY_ERROR_TIMEOUT);
+				uSynergyDisconnect(context, USYNERGY_ERROR_TIMEOUT);
 				context->m_sleepFunc(context->m_cookie, 1000);
-				break;
+				return;
 			}
-			else
-			{
-				num_received += ditch_received;
-			}
+			remaining -= discarded;
 		}
 		context->m_receiveOfs = 0;
 	}
@@ -937,7 +936,7 @@ void uSynergyInit(uSynergyContext *context)
 	memset(context, 0, sizeof(uSynergyContext));
 
 	/* Initialize to default state */
-	sSetDisconnected(context, USYNERGY_ERROR__INIT);
+	uSynergyDisconnect(context, USYNERGY_ERROR__INIT);
 }
 
 
@@ -954,7 +953,7 @@ void uSynergyUpdate(uSynergyContext *context)
 	else
 	{
 		/* Try to connect */
-		if (context->m_lastError > 0) {
+		if (context->m_lastError >= USYNERGY_ERROR_NONE) {
 			if (context->m_errorIsFatal[context->m_lastError]) {
 				logErr("Last error received (code %d) is configured as fatal, exiting", context->m_lastError);
 				Exit(SES_ERROR_SYN);
@@ -975,13 +974,13 @@ void uSynergyUpdate(uSynergyContext *context)
 /* check all formats in the clipboard message buffer */
 static bool uSynergyClipBufContains(uSynergyContext *context, enum uSynergyClipboardId id, uint32_t len, const char *data)
 {
-	uint32_t formats, flen;
+	uint32_t formats, format, flen;
 	struct sspBuf buf = {
 		.data = context->m_clipBuf[id],
 		.pos = 0,
-		.len = context->m_clipLen[id]
+		.len = context->m_clipPos[id]
 	};
-	if (!buf.data)
+	if (!buf.data || !buf.len)
 		return false;
 	if (context->m_clipInStream[id])
 		return false;
@@ -989,17 +988,16 @@ static bool uSynergyClipBufContains(uSynergyContext *context, enum uSynergyClipb
 		logErr("Clipboard parse error: %d, %d", buf.pos, buf.len);
 		return false;
 	}
-	for (int i = 0; i < formats; ++i) {
-		//skip the format, only check the raw data
-		if (!(sspNetU32(&buf, NULL) && sspNetU32(&buf, &flen))) {
-			logErr("Clipboard format parse error");
+	for (uint32_t i = 0; i < formats; ++i) {
+		size_t payload;
+		if (!(sspNetU32(&buf, &format) && sspNetU32(&buf, &flen)))
 			return false;
-		}
-		if (flen == len) {
-			if (!memcmp(data, buf.data + buf.pos, len)) {
-				return true;
-			}
-		}
+		payload = buf.pos;
+		if (!sspSeek(&buf, flen))
+			return false;
+		if (format == USYNERGY_CLIPBOARD_FORMAT_TEXT && flen == len &&
+		    !memcmp(data, buf.data + payload, len))
+			return true;
 	}
 	return false;
 }
@@ -1036,7 +1034,7 @@ void uSynergyUpdateClipBuf(uSynergyContext *context, enum uSynergyClipboardId id
 	memmove(buf, data, len);
 	/* Synergy 3 servers reply EBAD to a grab sent before the first screen
 	 * enter (sequence number still 0), so defer it until CINN arrives */
-	if (!context->m_sequenceNumber) {
+	if (!context->m_hasReceivedHello || !context->m_sequenceNumber) {
 		context->m_clipGrabPending[id] = true;
 		return;
 	}
@@ -1058,9 +1056,11 @@ void uSynergyUpdateRes(uSynergyContext *context, int16_t width, int16_t height)
 				width, height, context->m_clientWidth, context->m_clientHeight);
 		return;
 	}
+	if (width == context->m_clientWidth && height == context->m_clientHeight)
+		return;
 	context->m_clientWidth = width;
 	context->m_clientHeight = height;
-	if (context->m_connected) {
+	if (context->m_connected && context->m_hasReceivedHello) {
 		logDbg("Sending DINF to update screen resolution");
 		/* send information update */
 		uint16_t x = 0, y = 0, warp = 0;

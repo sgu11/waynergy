@@ -27,6 +27,7 @@ static char *read_file_dumb(char *path)
 	if (!(ssb_readfile(&s, f) && ssb_truncate(&s, s.pos))) {
 		ssb_free(&s);
 	}
+	fclose(f);
 
 	return s.buf;
 }
@@ -206,7 +207,9 @@ char **configReadLines(char *name)
 			break;
 		}
 	}
+	free(line[pos]);
 	line[pos] = NULL;
+	fclose(f);
 	free(path);
 	return xrealloc(line, sizeof(*line) * (pos + 1));
 }

@@ -394,6 +394,9 @@ this function will cause undefined behavior.
 **/
 extern void		uSynergyInit(uSynergyContext *context);
 
+/* Reset protocol state when the transport ends. The caller owns the socket. */
+extern void		uSynergyDisconnect(uSynergyContext *context, enum uSynergyError error);
+
 
 
 /**

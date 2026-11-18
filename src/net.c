@@ -68,6 +68,7 @@ static bool syn_connect_setup(struct synNetContext *snet_ctx, struct addrinfo *a
 		if (!(snet_ctx->tls_hash = load_cert_hash(snet_ctx->host))) {
 			if (!snet_ctx->tls_tofu) {
 				logErr("No certificate hash available");
+				tls_config_free(cfg);
 				return false;
 			}
 			/* if we are trusting on first use we just defer this
@@ -208,44 +209,48 @@ void netPollInit(void)
 }
 void netPoll(struct synNetContext *snet_ctx, struct wlContext *wl_ctx)
 {
-	int ret;
 	uSynergyContext *syn_ctx = snet_ctx->syn_ctx;
-	if (snet_ctx->fd == -1) {
-		logErr("INVALID FILE DESCRIPTOR for synergy context");
-	}
-	int wlfd = wlPrepareFd(wl_ctx);
 	netPollFd[POLLFD_SYN].fd = snet_ctx->fd;
-	netPollFd[POLLFD_WL].fd = wlfd;
+	netPollFd[POLLFD_WL].fd = wlPrepareFd(wl_ctx);
 	netPollFd[POLLFD_CLIP_MON].fd = clipMonitorFd;
-	int nfd = syn_ctx->m_connected ? POLLFD_COUNT : 1;
-	while ((ret = poll(netPollFd, nfd, USYNERGY_IDLE_TIMEOUT)) > 0) {
+	while (syn_ctx->m_connected) {
+		int ret = poll(netPollFd, POLLFD_COUNT, USYNERGY_IDLE_TIMEOUT);
 		sigHandleRun();
-		if (netPollFd[POLLFD_SYN].revents & POLLIN) {
+		if (ret < 0) {
+			if (errno == EINTR)
+				return;
+			logPErr("Network poll");
+			uSynergyDisconnect(syn_ctx, USYNERGY_ERROR_TIMEOUT);
+			break;
+		}
+
+		short events = netPollFd[POLLFD_SYN].revents;
+		if (events & POLLIN) {
 			uSynergyUpdate(syn_ctx);
+			if (!syn_ctx->m_connected)
+				break;
+		} else if (events & (POLLERR | POLLHUP | POLLNVAL)) {
+			logInfo("Synergy socket closed");
+			uSynergyDisconnect(syn_ctx, USYNERGY_ERROR_TIMEOUT);
+			break;
 		}
-		if ((int32_t)(syn_ctx->m_getTimeFunc() - syn_ctx->m_lastMessageTime) > USYNERGY_IDLE_TIMEOUT) {
+		if (!ret || (int32_t)(syn_ctx->m_getTimeFunc() - syn_ctx->m_lastMessageTime) > USYNERGY_IDLE_TIMEOUT) {
 			logErr("Synergy timeout encountered -- disconnecting");
-			synNetDisconnect(snet_ctx);
-			return;
+			uSynergyDisconnect(syn_ctx, USYNERGY_ERROR_TIMEOUT);
+			break;
 		}
 		sigHandleRun();
-		/* ignore everything else until synergy is ready */
-		if (syn_ctx->m_connected) {
-			wlPollProc(wl_ctx, netPollFd[POLLFD_WL].revents);
+		wlPollProc(wl_ctx, netPollFd[POLLFD_WL].revents);
+		sigHandleRun();
+		clipMonitorPollProc(&netPollFd[POLLFD_CLIP_MON]);
+		sigHandleRun();
+		for (int i = POLLFD_CLIP_UPDATER; i < POLLFD_COUNT; ++i) {
+			clipMonitorPollProc(netPollFd + i);
 			sigHandleRun();
-			clipMonitorPollProc(&netPollFd[POLLFD_CLIP_MON]);
-			sigHandleRun();
-			for (int i = POLLFD_CLIP_UPDATER; i < POLLFD_COUNT; ++i) {
-				clipMonitorPollProc(netPollFd + i);
-				sigHandleRun();
-			}
 		}
-		nfd = syn_ctx->m_connected ? POLLFD_COUNT : 1;
 	}
-	if (!ret) {
-		logErr("Poll timeout encountered -- disconnecting synergy");
-		synNetDisconnect(snet_ctx);
-	}
+	synNetDisconnect(snet_ctx);
+	wlInputReleaseAll(wl_ctx);
 	sigHandleRun();
 }
 
@@ -265,7 +270,6 @@ static bool syn_recv(uSynergyCookie cookie, uint8_t *buf, int max_len, int *out_
 	alarm(0);
 	if (*out_len < 1) {
 		logErr("Synergy receive timed out");
-		snet_ctx->syn_ctx->m_lastError = USYNERGY_ERROR_TIMEOUT;
 		return false;
 	}
 	return true;
@@ -309,7 +313,7 @@ bool synNetDisconnect(struct synNetContext *snet_ctx)
 		return false;
 	if (snet_ctx->tls_ctx) {
 		if (tls_close(snet_ctx->tls_ctx)) {
-			logErr("tls_close error: %s", snet_ctx->tls_ctx);
+			logErr("tls_close error: %s", tls_error(snet_ctx->tls_ctx));
 		}
 		free(snet_ctx->tls_hash);
 		snet_ctx->tls_hash = NULL;
@@ -319,6 +323,5 @@ bool synNetDisconnect(struct synNetContext *snet_ctx)
 	shutdown(snet_ctx->fd, SHUT_RDWR);
 	close(snet_ctx->fd);
 	snet_ctx->fd = -1;
-	snet_ctx->syn_ctx->m_connected = false;
 	return true;
 }

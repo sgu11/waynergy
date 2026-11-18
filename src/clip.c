@@ -5,7 +5,7 @@
 extern uSynergyContext synContext;
 extern char **environ;
 
-int clipMonitorFd;
+int clipMonitorFd = -1;
 struct sockaddr_un clipMonitorAddr;
 pid_t clipMonitorPid[2];
 
@@ -59,7 +59,7 @@ bool clipSetupSockets()
 	free(path);
 	unlink(clipMonitorAddr.sun_path);
 	clipMonitorAddr.sun_family = AF_UNIX;
-	if ((clipMonitorFd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+	if ((clipMonitorFd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0)) == -1) {
 		logPErr("socket");
 		return false;
 	}
@@ -128,7 +128,7 @@ void clipMonitorPollProc(struct pollfd *pfd)
 			for (int i = POLLFD_CLIP_UPDATER; i < POLLFD_COUNT; ++i) {
 				if (netPollFd[i].fd == -1) {
 					logDbg("Accepting");
-					netPollFd[i].fd = accept(clipMonitorFd, NULL, NULL);
+					netPollFd[i].fd = accept4(clipMonitorFd, NULL, NULL, SOCK_CLOEXEC);
 					if (netPollFd[i].fd == -1) {
 						logPErr("accept");
 						switch (errno) {
@@ -177,6 +177,10 @@ done:
 			pfd->fd = -1;
 			free(buf);
 		}
+	} else if (pfd->fd >= 0 && pfd->fd != clipMonitorFd &&
+	           (pfd->revents & (POLLHUP | POLLERR | POLLNVAL))) {
+		close(pfd->fd);
+		pfd->fd = -1;
 	}
 	return;
 }

@@ -38,6 +38,8 @@ static void inhibit_start(struct wlIdle *idle)
 {
 	struct ext_state *ext = idle->state;
 
+	if (ext->notification)
+		return;
 	ext->notification = ext_idle_notifier_v1_get_idle_notification(idle->wl_ctx->idle_notifier, ext->idle_time * 1000, idle->wl_ctx->seat);
 	if (!ext->notification) {
 		logErr("Could not get idle notification");

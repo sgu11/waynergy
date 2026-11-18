@@ -258,7 +258,7 @@ void wlKey(struct wlContext *ctx, int key, int id, int state)
 	wlKeyRaw(ctx, key, state);
 }
 
-void wlKeyReleaseAll(struct wlContext *ctx)
+void wlInputReleaseAll(struct wlContext *ctx)
 {
 	size_t i;
 	for (i = 0; i < ctx->input.key_press_state_len; ++i) {
@@ -266,6 +266,10 @@ void wlKeyReleaseAll(struct wlContext *ctx)
 			logDbg("Release all: key %zd, pressed %d times", i, ctx->input.key_press_state[i]);
 			wlKeyRaw(ctx, i, 0);
 		}
+	}
+	for (i = 0; i < WL_INPUT_BUTTON_COUNT; ++i) {
+		if (ctx->input.button_pressed[i])
+			wlMouseButton(ctx, i, 0);
 	}
 }
 
@@ -280,10 +284,11 @@ void wlMouseMotion(struct wlContext *ctx, int x, int y)
 }
 void wlMouseButton(struct wlContext *ctx, int button, int state)
 {
-	if (button >= WL_INPUT_BUTTON_COUNT) {
-		logWarn("Mouse button %d exceeds maximum %d, dropping", button, WL_INPUT_BUTTON_COUNT);
+	if (button < 0 || button >= WL_INPUT_BUTTON_COUNT) {
+		logWarn("Mouse button %d outside configured map, dropping", button);
 		return;
 	}
+	ctx->input.button_pressed[button] = state != 0;
 	logDbg("Mouse button: %d (mapped to %d), state: %d", button, ctx->input.button_map[button], state);
 	ctx->input.mouse_button(&ctx->input, ctx->input.button_map[button], state);
 }

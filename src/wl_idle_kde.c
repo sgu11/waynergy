@@ -38,6 +38,8 @@ static void inhibit_start(struct wlIdle *idle)
 {
 	struct kde_state *kde = idle->state;
 
+	if (kde->timeout)
+		return;
 	kde->timeout = org_kde_kwin_idle_get_idle_timeout(idle->wl_ctx->idle_manager, idle->wl_ctx->seat, kde->idle_time * 1000);
 	if (!kde->timeout) {
 		logErr("Could not get idle timeout");

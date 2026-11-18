@@ -50,5 +50,6 @@ struct synNetContext {
 bool synNetInit(struct synNetContext *net_ctx, uSynergyContext *syn_ctx, const char *host, const char *port, bool tls, bool tofu);
 void netPollInit(void);
 void netPoll(struct synNetContext *snet_ctx, struct wlContext *wl_ctx);
+/* Close the transport and leave protocol state to uSynergyDisconnect(). */
 bool synNetDisconnect(struct synNetContext *snet_ctx);
 

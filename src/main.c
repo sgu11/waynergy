@@ -128,9 +128,11 @@ void wl_output_update_cb(struct wlContext *context)
 		logWarn("Ignoring degenerate geometry update: %dx%d", width, height);
 		return;
 	}
+	if (width == context->width && height == context->height)
+		return;
 	logInfo("Geometry updated: %dx%d", width, height);
 	uSynergyUpdateRes(&synContext, width, height);
-	wlResUpdate(&wlContext, width, height);
+	wlResUpdate(context, width, height);
 }
 static void syn_active_cb(uSynergyCookie cookie, bool active)
 {
@@ -139,19 +141,21 @@ static void syn_active_cb(uSynergyCookie cookie, bool active)
 	char **cmd;
 
 	if (!active) {
-		wlKeyReleaseAll(&wlContext);
+		wlInputReleaseAll(&wlContext);
 	}
 
 	cmd = configReadLines(active ? "screen/enter" : "screen/exit");
 	if (!cmd) {
 		return;
 	}
+	sigWaitSIGCHLD(true);
 	for (i = 0; cmd[i]; ++i) {
 		ret = system(cmd[i]);
 		if (ret) {
 			logWarn("Screen state %s command #%zd (%s) failed with code %d", active ? "enter" : "exit", i, cmd[i], ret);
 		}
 	}
+	sigWaitSIGCHLD(false);
 	strfreev(cmd);
 }
 
@@ -309,7 +313,7 @@ opterror:
 	/* wayland context events */
 	wlContext.on_output_update = man_geom ? NULL : wl_output_update_cb;
 	/* set up clipboard */
-	if (clipHaveWlClipboard() && use_clipboard) {
+	if (use_clipboard && clipHaveWlClipboard()) {
 		synContext.m_clipboardCallback = syn_clip_cb;
 		if (!clipSetupSockets())
 			goto error;
