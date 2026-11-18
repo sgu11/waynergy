@@ -136,7 +136,7 @@ After `makepkg` has prepared the source, validate the extracted implementation:
 bash ./packaging/waynergy-custom/verify-debounce.sh
 ```
 
-The `0.0.17-6` recipe downloads a pinned, SHA-256-checked commit archive from
+The `0.0.17-7` recipe downloads a pinned, SHA-256-checked commit archive from
 `sgu11/waynergy`. Source changes live at the repository root. The earlier
 `0.0.17-5` release archive and generated patches are retained in Git history.
 See the [package notes](../packaging/waynergy-custom/README.md) for the update

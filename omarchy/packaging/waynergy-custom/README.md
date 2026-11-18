@@ -1,13 +1,15 @@
 # waynergy-custom
 
-Package `0.0.17-6` builds the root C source from
+Package `0.0.17-7` builds the root C source from
 [sgu11/waynergy](https://github.com/sgu11/waynergy). `PKGBUILD` pins the full
 source commit and its archive SHA-256. No behavior patches or nested source
 checkout are required.
 
 The pinned source includes protocol negotiation up to 1.8, deferred clipboard
 grabs, wheel debounce, screensaver child waiting, upstream timeout/PID/keymap
-fixes, and display geometry protection. The package metadata and verification
+fixes, and display geometry protection. This release resets protocol
+state and releases held input on disconnect, reaps screen-hook commands,
+and skips redundant display geometry updates. The package metadata and verification
 helpers can advance independently of the source pin when the C source is unchanged.
 
 ## Build and verify
@@ -62,4 +64,6 @@ python3 test/protocol-handshake.py build/waynergy
 ```
 
 This starts isolated clients against loopback servers, checks protocol 1.6–1.8
-negotiation and rejection of unsupported versions, and sends no input or lock events.
+negotiation, rejection of unsupported versions, and reconnect after an
+idle timeout. It also checks screen command completion and fatal exit
+policies without sending input or lock events.

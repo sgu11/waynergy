@@ -20,8 +20,9 @@ New public commits use the GitHub identity `sgu11` and
 and licenses. The Omarchy plugin uses the public ID `sgu11.waynergy`.
 
 The initial public source base was `ad49be7fe8f0347e790aef6c76858dc29ebed3d4`.
-Package `0.0.17-6` replaces release-archive patches with a pinned, SHA-256-checked
-archive from this public fork. See the [package update procedure](../packaging/waynergy-custom/README.md).
+The package has used a pinned, SHA-256-checked public archive since `0.0.17-6`.
+Package `0.0.17-7` pins source commit `24439202516fae66d50cdd65b1014efa8cfe0c1a`.
+See the [package update procedure](../packaging/waynergy-custom/README.md).
 Preserve the pinned source commit when merging, or update the recipe after a squash/rebase.
 
 ## Publication boundary

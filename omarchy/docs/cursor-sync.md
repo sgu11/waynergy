@@ -59,11 +59,9 @@ timeout and pointer position, and covers visibility recovery after a crash.
 It also unloads and reloads the native plugin to check startup compatibility
 and callback registration across reloads.
 
-The pinned source still uses `SA_NOCLDWAIT` for screen callbacks, so Waynergy
-may report `Screen state ... failed with code -1` even after the command
-succeeds. Use the helper's `hidden=true/false` output and the compositor's
-effective state to verify this feature. Screensaver callbacks already have
-the separate child-wait fix.
+Starting with `0.0.17-7`, Waynergy waits for screen-hook commands and
+reports their exit result. Verify the helper output and the compositor
+option to confirm that visibility changed.
 
 To remove this feature, move `cursor-sync.ini` outside `config.ini.d` and
 `cursor-sync.conf` outside `waynergy.service.d`, restore any previous files

@@ -2,7 +2,7 @@
 # Build the public fork directly; all behavior changes live in its root source.
 pkgname=waynergy
 pkgver=0.0.17
-pkgrel=6
+pkgrel=7
 pkgdesc="Synergy client for Wayland compositors with Deskflow and Omarchy support"
 arch=(x86_64)
 url="https://github.com/sgu11/waynergy"
@@ -13,10 +13,10 @@ optdepends=(
   'wl-clipboard: Clipboard synchronization support'
   'gnome-session: Idle inhibition for GNOME'
 )
-_commit=1c6ae9443fc2e774616f381770236fc9be7cc589
+_commit=24439202516fae66d50cdd65b1014efa8cfe0c1a
 source=("$pkgname-$_commit.tar.gz::$url/archive/$_commit.tar.gz"
         "verify-fork.sh" "verify-fork.c" "verify-debounce.sh" "verify-debounce.c")
-sha256sums=('b1432d9635d6f28640ef5a4d5455dfa6d92ace9d6af5f03e7bdcd4e30e1b5f30'
+sha256sums=('9221a6a686571580133a34ed9a2b6e68009b07d352628eab420a39d399c8573c'
             'd2e2b6c4ccb183916db0d068fb6029bb605ba20330db99f08c3124473a45afce'
             'e41ebdc0ec6cc99477f240188b88e4245dfb8e7b72460dc4354c0e9091434108'
             '1b062e605db07dc8ac76869d1b6351e5b3a218489a89b1f00e027103f4d44049'

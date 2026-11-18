@@ -19,7 +19,7 @@ Run this document's commands from that `omarchy/` directory. See
 | `scripts/waynergy-ctl` | `~/.local/bin/waynergy-ctl` | Reports live connection state and safely controls service/autostart |
 | `scripts/waynergy-display-watch` | `~/.local/bin/waynergy-display-watch` | Debounces Hyprland monitor add/remove events |
 | `omarchy-plugin/sgu11.waynergy/` | `~/.config/omarchy/plugins/sgu11.waynergy/` | Omarchy connection-status and control panel |
-| `packaging/waynergy-custom/` | pinned GitHub source build | Preferred: builds `0.0.17-6` instead of AUR |
+| `packaging/waynergy-custom/` | pinned GitHub source build | Preferred: builds `0.0.17-7` instead of AUR |
 | `scripts/install.sh` | run from this repository | Installs the captured configuration safely |
 | `scripts/doctor.sh` | run from this repository | Read-only installation and runtime checks |
 
@@ -30,7 +30,7 @@ the working systemd unit because Waynergy already reconnects by itself.
 ## Quick start
 
 `wl-clipboard` enables clipboard synchronization. The installer now builds
-Waynergy from a pinned `sgu11/waynergy` commit (`packaging/waynergy-custom`, `0.0.17-6`) which
+Waynergy from a pinned `sgu11/waynergy` commit (`packaging/waynergy-custom`, `0.0.17-7`) which
 contains the Deskflow/Synergy 1.8 EBAD fix and Barrier protocol support, instead
 of the unpatched AUR package:
 
@@ -71,7 +71,7 @@ service. A stopped service reads the new setting on its next start.
 
 The panel also has a wheel-debounce switch. It is guarded by a binary
 capability check (looks for the debounce log marker), so the stock AUR binary
-leaves it unavailable; the custom fork (`0.0.17-6`) enables it and uses the
+leaves it unavailable; the custom fork (`0.0.17-7`) enables it and uses the
 configured positive threshold. Turning the filter off writes zero. Enabling
 from zero selects 100 ms.
 
@@ -127,10 +127,10 @@ installation and approve the printed SHA-256 fingerprint on the server:
 
 ## Current source baseline
 
-Updated on 2026-09-28. The public fork includes upstream `master` through
-`ad49be7`, plus the integrated protocol negotiation and display fixes:
+The public fork includes upstream `master` through `ad49be7`. Package
+`0.0.17-7` adds connection cleanup and screen command fixes.
 
-- `waynergy 0.0.17-6` (existing fork fixes + protocol negotiation + display geometry protection)
+- `waynergy 0.0.17-7` (protocol negotiation, reconnect cleanup, and display geometry protection)
 - `wl-clipboard` for clipboard synchronization
 - Wayland `wlr` input backend
 - Deskflow 1.26.0.418 (legacy `Synergy` protocol, also supports `Barrier`) / Synergy 1.8 over port `24800`
@@ -141,10 +141,12 @@ The custom fork accepts `Barrier`/`Deskflow`/`Synergy` hello messages, negotiate
 up to protocol 1.8, and defers `CCLP` until `CINN`. It preserves the remaining
 output list when the first monitor disappears and ignores nonpositive screen
 sizes, keeping the last valid geometry. The display watcher remains available
-for rebuilding compositor state after monitor changes.
-Wheel debounce remains disabled (`0`) by default;
-the package release is `0.0.17-6`. The binary reports `0.0.17`, optionally with
-a Git-derived version suffix when built inside a checkout. The legacy AUR
+for rebuilding compositor state after monitor changes. The native client
+clears handshake and clipboard receive state and releases held keys and
+buttons on disconnect.
+
+Wheel debounce defaults to `0` (disabled). The binary reports `0.0.17`,
+optionally with a Git-derived version suffix when built inside a checkout. The legacy AUR
 build was `0.0.17-1.2`.
 
 The four upstream commits improve Wayland connection errors, process cleanup,
