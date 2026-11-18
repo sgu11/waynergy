@@ -29,7 +29,8 @@ Panel {
 
   property var info: ({})
   property var action: null
-  property string actionPhase: "idle"
+  property bool actionFinished: false
+  property var statusAction: null
   property bool readingStatus: false
   property bool refreshPending: false
   property int cursorIndex: 0          // 0 = 서비스, 1 = 자동 시작, 2 = 디바운스, 3 = 휠 배수
@@ -83,61 +84,57 @@ Panel {
 
   function refresh() {
     refreshPending = true
-    advance()
+    startStatus()
   }
 
-  function advance() {
-    // A mutation starts after the current read and finishes with a fresh read.
-    if (readingStatus || actionPhase === "running") return
-    if (actionPhase === "queued") {
-      actionPhase = "running"
-      actionProc.command = action.command
-      actionProc.running = true
-    } else if (refreshPending) {
-      refreshPending = false
-      readingStatus = true
-      infoProc.running = true
-    }
+  function startStatus() {
+    if (!refreshPending || readingStatus || (action !== null && !actionFinished)) return
+    statusAction = action
+    refreshPending = false
+    readingStatus = true
+    infoProc.running = true
   }
 
   function finishStatus(code, text) {
     if (!readingStatus) return
     readingStatus = false
-    let snapshot = null
-    if (code === 0) {
-      try { snapshot = JSON.parse(text) } catch (error) {}
+    // A status read taken before a mutation cannot confirm its result.
+    if (statusAction === action) {
+      let snapshot = null
+      if (code === 0) {
+        try { snapshot = JSON.parse(text) } catch (error) {}
+      }
+      info = (snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)) ? snapshot : ({})
+      if (action !== null) {
+        action = null
+        actionFinished = false
+      }
     }
-    info = (snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)) ? snapshot : ({})
-    if (actionPhase === "confirming") {
-      action = null
-      actionPhase = "idle"
-    }
-    Qt.callLater(advance)
+    statusAction = null
+    Qt.callLater(startStatus)
   }
 
   function finishAction() {
-    if (actionPhase !== "running") return
-    actionPhase = "confirming"
+    if (action === null || actionFinished) return
+    actionFinished = true
     refreshPending = true
-    Qt.callLater(advance)
+    Qt.callLater(startStatus)
     settle.restart()
   }
 
   function runAction(kind, value, args) {
     if (!installed || action !== null) return
-    action = { kind: kind, value: value, command: ["waynergy-ctl"].concat(args) }
-    actionPhase = "queued"
-    advance()
+    action = { kind: kind, value: value }
+    actionProc.command = ["waynergy-ctl"].concat(args)
+    actionProc.running = true
   }
 
   function toggleService() {
-    const start = !svcActive
-    runAction("service", start, [start ? "start" : "stop"])
+    runAction("service", !svcActive, ["toggle"])
   }
 
   function toggleAutostart() {
-    const enable = !autostart
-    runAction("autostart", enable, [enable ? "enable" : "disable"])
+    runAction("autostart", !autostart, ["autostart"])
   }
 
   function setWheelMult(value) {
@@ -194,7 +191,7 @@ Panel {
 
   Process {
     id: infoProc
-    command: ["waynergy-ctl", "info"]
+    command: ["timeout", "--kill-after=1s", "5s", "waynergy-ctl", "info"]
     stdout: StdioCollector { id: infoOutput; waitForEnd: true }
     onExited: function (code) { root.finishStatus(code, infoOutput.text) }
     // An executable that fails to start emits runningChanged without exited.
@@ -507,6 +504,7 @@ Panel {
 
     Text {
       id: valueText
+      textFormat: Text.PlainText
       anchors.left: labelText.right
       anchors.leftMargin: Style.space(12)
       anchors.right: parent.right

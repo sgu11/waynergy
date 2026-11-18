@@ -98,3 +98,5 @@ Keep wheel mutations serialized across the read, backup, replace, and apply
 steps. Use systemd try-restart so settings edits respect an explicitly stopped
 service. In Quickshell, a failed Process spawn can signal runningChanged without
 exited. Verify both completion paths and the post-action status read.
+Service and autostart IPC toggle the state read by the CLI at execution time.
+Verify those calls with stale panel state and a stalled status probe.

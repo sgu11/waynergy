@@ -75,7 +75,7 @@ connected() {
   local pid="${unit[MainPID]-}" host="${config[host]-localhost}" port="${config[port]-24800}" sockets
   [[ "$pid" =~ ^[1-9][0-9]*$ && -n "$host" && -n "$port" ]] || return 1
   [[ "$host" != *:* ]] || host="[$host]"
-  sockets=$(ss -tnpH state established "dst $host and dport = $port" 2>/dev/null) || return 1
+  sockets=$(timeout --kill-after=1s 2s ss -tnpH state established "dst $host and dport = $port" 2>/dev/null) || return 1
   [[ "$sockets" == *"pid=$pid,"* ]]
 }
 

@@ -77,9 +77,11 @@ session's remote input path.
 
 Routine status refresh is deliberately invisible. The earlier bar widget
 treated its polling processes as a visual busy state and lowered icon opacity
-while each process ran, causing a brief flicker every five seconds. The panel
-finishes an in-flight status query before issuing a mutation and retains the
-requested value until the first status query after the command completes.
+while each process ran, causing a brief flicker every five seconds. A control
+command can run while a status query is in flight. Service and login autostart
+toggles read systemd when the command runs. The panel retains the requested
+value until a status query started after completion returns. Socket checks
+have a two-second timeout and the panel bounds the whole status command.
 
 The panel also exposes a three-value wheel multiplier selector (`×1`, `×2`,
 `×3`). `waynergy-ctl set-wheel-mult` validates the value, preserves the rest
