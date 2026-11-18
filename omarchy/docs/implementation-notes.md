@@ -66,6 +66,8 @@ configuration comments in that form, particularly when a comment contains
 `waynergy-ctl` is the single state and mutation boundary used by the panel and
 doctor. Each query reads systemd's active state and main PID together and
 checks that PID for an established socket to the configured `host:port`.
+The running client's host and port arguments override the INI values for
+the socket check, endpoint display, and TLS pin lookup.
 The resulting connection indicator represents TCP establishment. Waynergy
 then completes TLS and the Deskflow protocol handshake and awaits screen entry.
 

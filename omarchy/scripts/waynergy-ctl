@@ -79,6 +79,30 @@ connected() {
   [[ "$sockets" == *"pid=$pid,"* ]]
 }
 
+read_running_endpoint() {
+  local pid="${unit[MainPID]-}" program option key i
+  local -a args=()
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 0
+  mapfile -d '' -t args 2>/dev/null <"/proc/$pid/cmdline" || return 0
+  program=${args[0]-}
+  [[ "${program##*/}" == "$BIN" ]] || return 0
+
+  for ((i = 1; i < ${#args[@]}; ++i)); do
+    option=${args[i]}
+    [[ "$option" == -?* && "$option" != -- ]] || break
+    # A short option that takes a value is last in its group.
+    [[ "$option" == --* ]] || option="-${option: -1}"
+    case "$option" in
+      -c|--host) key=host ;;
+      -p|--port) key=port ;;
+      -b|-W|-H|-N|-l|-L|--backend|--width|--height|--name|--logfile|--loglevel) ((++i)); continue ;;
+      *) continue ;;
+    esac
+    ((++i < ${#args[@]})) || break
+    config[$key]=${args[i]}
+  done
+}
+
 read_status() {
   local key value properties
   command -v "$BIN" >/dev/null || return 3
@@ -89,6 +113,7 @@ read_status() {
   done <<< "$properties"
   case "${unit[LoadState]-}" in loaded|masked) ;; *) return 3 ;; esac
   [[ "${unit[ActiveState]-}" == active ]] || return 2
+  read_running_endpoint
   connected && return 0
   return 1
 }
@@ -118,8 +143,9 @@ json_string() {
 
 info() {
   local st installed=false active=false conn=false autostart=false supported=false pinned=false
-  local ver="" version_output host="${config[host]-localhost}" level="${config[log.level]-}"
+  local ver="" version_output host level="${config[log.level]-}"
   read_status; st=$?
+  host=${config[host]-localhost}
   ((st < 3)) && installed=true
   ((st < 2)) && active=true
   ((st == 0)) && conn=true

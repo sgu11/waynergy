@@ -93,7 +93,8 @@ input-setup behavior that can remove the native Fcitx trigger.
 # Panel state and wheel updates
 
 Read ActiveState and MainPID in the same systemd sample and match that PID in
-the live socket output. Preserve the JSON fields and state exit codes 0–3.
+the live socket output. Read a running client's host and port arguments before
+matching the socket or pin. Preserve the JSON fields and state exit codes 0–3.
 Keep wheel mutations serialized across the read, backup, replace, and apply
 steps. Use systemd try-restart so settings edits respect an explicitly stopped
 service. In Quickshell, a failed Process spawn can signal runningChanged without
